@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Rojo generated files
+sourcemap.json
+
+# Temporary files
+*.log
+
+# Local editor settings
+.vscode/
