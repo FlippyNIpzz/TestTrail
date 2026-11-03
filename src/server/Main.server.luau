@@ -1,81 +1,17 @@
+--!strict
 
-local Players = game:GetService("Players")
+-- Foundation scaffold entry point. Gameplay remains unavailable until services are implemented.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local Services = script.Parent.Services
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-
--- NETWORK
-local NetworkManager = require(
-    Shared.Network.NetworkManager
-)
-
--- PLAYER SYSTEM
-local PlayerDataService = require(
-    Services.Player.PlayerDataService
-)
-
--- WORLD SYSTEMS
-local BaseService = require(
-    Services.Base.BaseService
-)
-
-local ArenaService = require(
-    Services.Arena.ArenaService
-)
-
-local ArenaEventService = require(
-    Services.Arena.ArenaEventService
-)
-
-local ResourceSpawner = require(
-    Services.Resources.ResourceSpawner
-)
-
--- SERVER INITIALIZATION
-NetworkManager.Initialize()
-BaseService.Initialize()
-ArenaService.Initialize()
-ArenaEventService.Initialize()
-ResourceSpawner.Initialize()
-ResourceSpawner.Start()
-
--- PLAYER JOIN
-local function OnPlayerAdded(player)
-    PlayerDataService.Load(player)
-
-    local base = BaseService.Assign(player)
-
-    if not base then
-        return
-    end
-
-    player.CharacterAdded:Connect(function(character)
-        BaseService.SpawnCharacter(player, character)
-    end)
-
-    if player.Character then
-        BaseService.SpawnCharacter(player, player.Character)
+local GameConfig = require(Shared.Features.Game.GameConfig)
+local Lifecycle = require(Shared.Features.Lifecycle.LifecycleHelpers)
+local order = { "Networking", "PlayerData", "Currency", "Inventory", "Base", "Resources", "Facilities", "Upgrades", "UI", "Companion", "Combat", "Arena", "Rebirth", "Admin" }
+local modules = {}
+for _, name in order do
+    if GameConfig.Features[name] then
+        table.insert(modules, require(script.Parent.Features[name][name .. "Server"]))
     end
 end
-
--- PLAYER LEAVE
-local function OnPlayerRemoving(player)
-    PlayerDataService.Save(player)
-    BaseService.Release(player)
-    PlayerDataService.Remove(player)
-end
-
-Players.PlayerAdded:Connect(OnPlayerAdded)
-Players.PlayerRemoving:Connect(OnPlayerRemoving)
-
-for _, player in Players:GetPlayers() do
-    OnPlayerAdded(player)
-end
-
--- SERVER SHUTDOWN
-game:BindToClose(function()
-    for _, player in Players:GetPlayers() do
-        PlayerDataService.Save(player)
-    end
-end)
+local destroy = Lifecycle.Run(modules, { GameConfig = GameConfig, Shared = Shared, Features = script.Parent.Features })
+script.Destroying:Connect(destroy)
+warn("[Foundation] Player sessions initialized. Gameplay services remain under construction.")

@@ -9,3 +9,6 @@ sourcemap.json
 
 # Local editor settings
 .vscode/
+
+# Local Studio place backups
+/backups/

@@ -1,0 +1,103 @@
+{
+  "generator": "Built-in image_gen",
+  "date": "2026-10-27",
+  "notes": "16 separate generated PNG card illustrations. Stat tracks intentionally empty; displayed numbers are maximum stat levels only. Rarity colors: Common stone gray, Rare blue, Epic purple, Legendary gold. Source images retained unmodified. Raster generation approximates a shared coarse pixel grid; no deterministic pixel-grid normalization applied.",
+  "cards": [
+    {
+      "type": "electric",
+      "rarity": "common",
+      "file": "electric-common.png",
+      "prompt": "Use case: stylized-concept. Create ONE finished 2D pixel-art companion trading card for Roblox game Scaffolding Tycoon, portrait 2:3, straight-on flat asset filling canvas, no surrounding scene. References are style guides only: Sand Wizard for chunky pixel character and card arrangement, cash for crisp coarse square pixel clusters and dark outlines. Original ELECTRIC companion: small charming block-built electrical golem with square head, luminous yellow eyes, dark teal iron body, yellow lightning core, short chunky limbs, little lightning arcs, stone workshop backdrop. Strict intentional low-resolution pixel-art look, logical 160x240 pixel grid enlarged by integer nearest-neighbor, no smooth gradients, no blur, no vector curves, no tiny painterly detail. Limited palette, coarse Minecraft-like mottled stone/metal texture, 1 logical pixel dark outlines. Reusable layout: dark stepped rectangular border with gray stone COMMON trim, top title 'ELECTRIC', directly below smaller 'COMMON', central character panel covering middle 60%, bottom dark panel with exactly three horizontal stat bars. Labels verbatim 'DAMAGE', 'STAMINA', 'HEALTH'; at right of each row 'MAX 20'. Bars are empty dark segmented tracks, caps only, no invented current values. Damage accent orange, stamina cyan, health red. Block pixel typography clear and readable. Same visual pixel scale throughout. No logo, signature, watermark, extra text, photorealism or 3D rendering."
+    },
+    {
+      "type": "electric",
+      "rarity": "rare",
+      "file": "electric-rare.png",
+      "prompt": "Use case: stylized-concept. Generate ONE standalone portrait 2:3 2D pixel companion card for Scaffolding Tycoon. Input image is the approved visual template: match its exact layout, coarse pixel size, dark outlines, mottled block textures, typography, portrait framing and stat panel positions. Create ELECTRIC RARE: same electric golem, reinforced shoulder blocks and slightly stronger lightning. Replace frame trim with blue steel, keep same frame silhouette. Exact text: top 'ELECTRIC', rarity 'RARE', bottom three rows 'DAMAGE', 'STAMINA', 'HEALTH', each followed by empty segmented dark stat track and 'MAX 25'. All three caps must be 25. No current stat values, no filled stats. Chunky intentional pixel clusters, limited palette, no blur or smooth painterly gradients. Original friendly game companion. Card fills image, no scene outside card, no watermark or signature. Preserve the common card's character identity while evolving armor and effects for this rarity."
+    },
+    {
+      "type": "electric",
+      "rarity": "epic",
+      "file": "electric-epic.png",
+      "prompt": "Use case: stylized-concept. Generate ONE standalone portrait 2:3 2D pixel companion card for Scaffolding Tycoon. Input image is the approved visual template: match its exact layout, coarse pixel size, dark outlines, mottled block textures, typography, portrait framing and stat panel positions. Create ELECTRIC EPIC: same electric golem, larger lightning core and angular charged shoulder plates. Replace frame trim with purple amethyst, keep same frame silhouette. Exact text: top 'ELECTRIC', rarity 'EPIC', bottom three rows 'DAMAGE', 'STAMINA', 'HEALTH', each followed by empty segmented dark stat track and 'MAX 30'. All three caps must be 30. No current stat values, no filled stats. Chunky intentional pixel clusters, limited palette, no blur or smooth painterly gradients. Original friendly game companion. Card fills image, no scene outside card, no watermark or signature. Preserve the common card's character identity while evolving armor and effects for this rarity."
+    },
+    {
+      "type": "electric",
+      "rarity": "legendary",
+      "file": "electric-legendary.png",
+      "prompt": "Use case: stylized-concept. Generate ONE standalone portrait 2:3 2D pixel companion card for Scaffolding Tycoon. Input image is the approved visual template: match its exact layout, coarse pixel size, dark outlines, mottled block textures, typography, portrait framing and stat panel positions. Create ELECTRIC LEGENDARY: same electric golem, radiant lightning core and ornate block-built golden armor accents. Replace frame trim with gold, keep same frame silhouette. Exact text: top 'ELECTRIC', rarity 'LEGENDARY', bottom three rows 'DAMAGE', 'STAMINA', 'HEALTH', each followed by empty segmented dark stat track and 'MAX 36'. All three caps must be 36. No current stat values, no filled stats. Chunky intentional pixel clusters, limited palette, no blur or smooth painterly gradients. Original friendly game companion. Card fills image, no scene outside card, no watermark or signature. Preserve the common card's character identity while evolving armor and effects for this rarity."
+    },
+    {
+      "type": "water",
+      "rarity": "common",
+      "file": "water-common.png",
+      "prompt": "Use case: stylized-concept. ONE standalone portrait 2:3 2D pixel companion card for Scaffolding Tycoon. First input is the style/layout template; match its pixel size, outlines, block textures, typography, framing and stat row positions exactly.  Subject: friendly block-built aqua water golem, square head with bright pale eyes, translucent-looking cyan pixel water body contained in dark teal stone armor, water droplet chest core, splashing square droplets, stone reservoir workshop backdrop; simple armor. Type WATER. Rarity COMMON. Frame trim gray stone, same stepped silhouette. Exact text: top 'WATER', rarity 'COMMON', bottom exactly three rows 'DAMAGE', 'STAMINA', 'HEALTH'; each has empty dark segmented track and 'MAX 20'. All three maximums 20. No current stat values. Damage orange, stamina cyan, health red. Limited palette chunky square pixel clusters and dark outlines, coarse Minecraft-like texture. No smooth gradients, blur, vector art, 3D render, watermark or signature. Card fills canvas."
+    },
+    {
+      "type": "water",
+      "rarity": "rare",
+      "file": "water-rare.png",
+      "prompt": "Use case: stylized-concept. ONE standalone portrait 2:3 2D pixel companion card for Scaffolding Tycoon. First input is the style/layout template; match its pixel size, outlines, block textures, typography, framing and stat row positions exactly. Second input defines WATER companion identity; preserve its face, body and environment. Subject: friendly block-built aqua water golem, square head with bright pale eyes, translucent-looking cyan pixel water body contained in dark teal stone armor, water droplet chest core, splashing square droplets, stone reservoir workshop backdrop; reinforced shoulders. Type WATER. Rarity RARE. Frame trim blue steel, same stepped silhouette. Exact text: top 'WATER', rarity 'RARE', bottom exactly three rows 'DAMAGE', 'STAMINA', 'HEALTH'; each has empty dark segmented track and 'MAX 25'. All three maximums 25. No current stat values. Damage orange, stamina cyan, health red. Limited palette chunky square pixel clusters and dark outlines, coarse Minecraft-like texture. No smooth gradients, blur, vector art, 3D render, watermark or signature. Card fills canvas."
+    },
+    {
+      "type": "water",
+      "rarity": "epic",
+      "file": "water-epic.png",
+      "prompt": "Use case: stylized-concept. ONE standalone portrait 2:3 2D pixel companion card for Scaffolding Tycoon. First input is the style/layout template; match its pixel size, outlines, block textures, typography, framing and stat row positions exactly. Second input defines WATER companion identity; preserve its face, body and environment. Subject: friendly block-built aqua water golem, square head with bright pale eyes, translucent-looking cyan pixel water body contained in dark teal stone armor, water droplet chest core, splashing square droplets, stone reservoir workshop backdrop; crystal shoulder plates and swirling water. Type WATER. Rarity EPIC. Frame trim purple amethyst, same stepped silhouette. Exact text: top 'WATER', rarity 'EPIC', bottom exactly three rows 'DAMAGE', 'STAMINA', 'HEALTH'; each has empty dark segmented track and 'MAX 30'. All three maximums 30. No current stat values. Damage orange, stamina cyan, health red. Limited palette chunky square pixel clusters and dark outlines, coarse Minecraft-like texture. No smooth gradients, blur, vector art, 3D render, watermark or signature. Card fills canvas."
+    },
+    {
+      "type": "water",
+      "rarity": "legendary",
+      "file": "water-legendary.png",
+      "prompt": "Use case: stylized-concept. ONE standalone portrait 2:3 2D pixel companion card for Scaffolding Tycoon. First input is the style/layout template; match its pixel size, outlines, block textures, typography, framing and stat row positions exactly. Second input defines WATER companion identity; preserve its face, body and environment. Subject: friendly block-built aqua water golem, square head with bright pale eyes, translucent-looking cyan pixel water body contained in dark teal stone armor, water droplet chest core, splashing square droplets, stone reservoir workshop backdrop; ornate golden armor accents and powerful water swirl. Type WATER. Rarity LEGENDARY. Frame trim gold, same stepped silhouette. Exact text: top 'WATER', rarity 'LEGENDARY', bottom exactly three rows 'DAMAGE', 'STAMINA', 'HEALTH'; each has empty dark segmented track and 'MAX 36'. All three maximums 36. No current stat values. Damage orange, stamina cyan, health red. Limited palette chunky square pixel clusters and dark outlines, coarse Minecraft-like texture. No smooth gradients, blur, vector art, 3D render, watermark or signature. Card fills canvas."
+    },
+    {
+      "type": "gravity",
+      "rarity": "common",
+      "file": "gravity-common.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching layout, pixel size/density, coarse block textures, dark outlines, lettering and stat positions.  Subject: friendly block-built dark violet gravity golem, square head and lavender eyes, purple circular gravity core on chest, levitating stone cubes around short chunky limbs, dark stone workshop backdrop; simple armor. Rarity COMMON, gray stone frame trim. Keep template stepped silhouette and workshop visual language. Top exact text 'GRAVITY', below 'COMMON'. Bottom EXACTLY three rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each row contains empty dark segmented stat track and 'MAX 20' on right. All three maximums 20, no current stats. Coarse intentional square pixel clusters, limited palette, no smooth gradients or antialiasing, no blur, no 3D render. Friendly original block companion. Straight-on flat card fills canvas, no watermark or signature."
+    },
+    {
+      "type": "gravity",
+      "rarity": "rare",
+      "file": "gravity-rare.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching layout, pixel size/density, coarse block textures, dark outlines, lettering and stat positions. Reference 2 sets GRAVITY character identity; preserve face/body. Subject: friendly block-built dark violet gravity golem, square head and lavender eyes, purple circular gravity core on chest, levitating stone cubes around short chunky limbs, dark stone workshop backdrop; reinforced shoulders. Rarity RARE, blue steel frame trim. Keep template stepped silhouette and workshop visual language. Top exact text 'GRAVITY', below 'RARE'. Bottom EXACTLY three rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each row contains empty dark segmented stat track and 'MAX 25' on right. All three maximums 25, no current stats. Coarse intentional square pixel clusters, limited palette, no smooth gradients or antialiasing, no blur, no 3D render. Friendly original block companion. Straight-on flat card fills canvas, no watermark or signature."
+    },
+    {
+      "type": "gravity",
+      "rarity": "epic",
+      "file": "gravity-epic.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching layout, pixel size/density, coarse block textures, dark outlines, lettering and stat positions. Reference 2 sets GRAVITY character identity; preserve face/body. Subject: friendly block-built dark violet gravity golem, square head and lavender eyes, purple circular gravity core on chest, levitating stone cubes around short chunky limbs, dark stone workshop backdrop; amethyst shoulder plates and stronger orbit. Rarity EPIC, purple amethyst frame trim. Keep template stepped silhouette and workshop visual language. Top exact text 'GRAVITY', below 'EPIC'. Bottom EXACTLY three rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each row contains empty dark segmented stat track and 'MAX 30' on right. All three maximums 30, no current stats. Coarse intentional square pixel clusters, limited palette, no smooth gradients or antialiasing, no blur, no 3D render. Friendly original block companion. Straight-on flat card fills canvas, no watermark or signature."
+    },
+    {
+      "type": "gravity",
+      "rarity": "legendary",
+      "file": "gravity-legendary.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching layout, pixel size/density, coarse block textures, dark outlines, lettering and stat positions. Reference 2 sets GRAVITY character identity; preserve face/body. Subject: friendly block-built dark violet gravity golem, square head and lavender eyes, purple circular gravity core on chest, levitating stone cubes around short chunky limbs, dark stone workshop backdrop; ornate golden armor accents and dramatic orbiting stone cubes. Rarity LEGENDARY, gold frame trim. Keep template stepped silhouette and workshop visual language. Top exact text 'GRAVITY', below 'LEGENDARY'. Bottom EXACTLY three rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each row contains empty dark segmented stat track and 'MAX 36' on right. All three maximums 36, no current stats. Coarse intentional square pixel clusters, limited palette, no smooth gradients or antialiasing, no blur, no 3D render. Friendly original block companion. Straight-on flat card fills canvas, no watermark or signature."
+    },
+    {
+      "type": "magneto",
+      "rarity": "common",
+      "file": "magneto-common.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching card layout, coarse square pixel size/density, mottled textures, dark outlines, typography, frame silhouette and stat row positions.  Subject: original friendly block-built magnet golem, square iron head, cyan eyes, red and blue horseshoe magnet chest core, chunky iron limbs, small bolts and iron cubes floating near magnetic hands, stone metalworking workshop backdrop. Magneto means an original magnet-themed companion, no existing superhero likeness; simple armor. Rarity COMMON, gray stone frame trim. Top exact text 'MAGNETO', below 'COMMON'. Bottom EXACTLY three stat rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each has empty dark segmented track and 'MAX 20' at right. All three maximums 20, no current values. Original friendly magnet-themed game golem. Coarse intentional square pixel clusters, limited palette, no blur, no smooth gradients, no antialiasing, no 3D render. Straight-on flat card fills canvas; no watermark, logo or signature."
+    },
+    {
+      "type": "magneto",
+      "rarity": "rare",
+      "file": "magneto-rare.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching card layout, coarse square pixel size/density, mottled textures, dark outlines, typography, frame silhouette and stat row positions. Reference 2 sets MAGNETO character identity; preserve face, body, horseshoe chest magnet. Subject: original friendly block-built magnet golem, square iron head, cyan eyes, red and blue horseshoe magnet chest core, chunky iron limbs, small bolts and iron cubes floating near magnetic hands, stone metalworking workshop backdrop. Magneto means an original magnet-themed companion, no existing superhero likeness; reinforced shoulders. Rarity RARE, blue steel frame trim. Top exact text 'MAGNETO', below 'RARE'. Bottom EXACTLY three stat rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each has empty dark segmented track and 'MAX 25' at right. All three maximums 25, no current values. Original friendly magnet-themed game golem. Coarse intentional square pixel clusters, limited palette, no blur, no smooth gradients, no antialiasing, no 3D render. Straight-on flat card fills canvas; no watermark, logo or signature."
+    },
+    {
+      "type": "magneto",
+      "rarity": "epic",
+      "file": "magneto-epic.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching card layout, coarse square pixel size/density, mottled textures, dark outlines, typography, frame silhouette and stat row positions. Reference 2 sets MAGNETO character identity; preserve face, body, horseshoe chest magnet. Subject: original friendly block-built magnet golem, square iron head, cyan eyes, red and blue horseshoe magnet chest core, chunky iron limbs, small bolts and iron cubes floating near magnetic hands, stone metalworking workshop backdrop. Magneto means an original magnet-themed companion, no existing superhero likeness; angular steel shoulder plates and stronger magnetic arcs. Rarity EPIC, purple amethyst frame trim. Top exact text 'MAGNETO', below 'EPIC'. Bottom EXACTLY three stat rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each has empty dark segmented track and 'MAX 30' at right. All three maximums 30, no current values. Original friendly magnet-themed game golem. Coarse intentional square pixel clusters, limited palette, no blur, no smooth gradients, no antialiasing, no 3D render. Straight-on flat card fills canvas; no watermark, logo or signature."
+    },
+    {
+      "type": "magneto",
+      "rarity": "legendary",
+      "file": "magneto-legendary.png",
+      "prompt": "Use case: stylized-concept. ONE portrait 2:3 2D pixel companion trading card for Scaffolding Tycoon. Reference 1 sets exact matching card layout, coarse square pixel size/density, mottled textures, dark outlines, typography, frame silhouette and stat row positions. Reference 2 sets MAGNETO character identity; preserve face, body, horseshoe chest magnet. Subject: original friendly block-built magnet golem, square iron head, cyan eyes, red and blue horseshoe magnet chest core, chunky iron limbs, small bolts and iron cubes floating near magnetic hands, stone metalworking workshop backdrop. Magneto means an original magnet-themed companion, no existing superhero likeness; ornate golden armor accents and powerful red-blue magnetic arcs. Rarity LEGENDARY, gold frame trim. Top exact text 'MAGNETO', below 'LEGENDARY'. Bottom EXACTLY three stat rows: 'DAMAGE' orange, 'STAMINA' cyan, 'HEALTH' red. Each has empty dark segmented track and 'MAX 36' at right. All three maximums 36, no current values. Original friendly magnet-themed game golem. Coarse intentional square pixel clusters, limited palette, no blur, no smooth gradients, no antialiasing, no 3D render. Straight-on flat card fills canvas; no watermark, logo or signature."
+    }
+  ]
+}
