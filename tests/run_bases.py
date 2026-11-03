@@ -16,6 +16,13 @@ local game = { GetService = function(_, name)
     if name == "Players" then return Players end
     return { Shared = {} }
 end, FindFirstChild = function(_, name) if name == "Workspace" then return workspace end return nil end }
+local storage = Instance.new("Folder")
+storage.Name = "ServerStorage"
+local originalFind = game.FindFirstChild
+game.FindFirstChild = function(self, name)
+    if name == "ServerStorage" then return storage end
+    return originalFind(self, name)
+end
 local profiles, rejected = {}, false
 local PlayerData = {}
 ''')

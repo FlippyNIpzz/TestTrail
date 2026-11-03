@@ -6,18 +6,18 @@ for level = 1, 4 do
     layouts[level] = {
         ModelType = "base.level_" .. level,
         Asset = { Kind = "ProjectPath", ExpectedClass = "Model",
-            Path = { "Workspace", "Bases", "NoGemBases", "Base_Level_" .. level } },
+            Path = { "ServerStorage", "PlotLevelModels", "Base_Level_" .. level } },
         FloorName = "Floor", SpawnOffset = CFrame.new(0, 4, 0),
     }
 end
 local plots = {}
-for level = 0, 4 do
-    table.insert(plots, { Id = "base.plot_" .. (#plots + 1),
-        Path = { "Workspace", "Bases", "NoGemBases", "Base_Level_" .. level } })
-end
-for index = 6, 13 do
-    table.insert(plots, { Id = "base.plot_" .. (#plots + 1),
-        Path = { "Workspace", "Bases", "PlacedBases", string.format("BaseSlot_%02d", index) } })
+-- Explicit authored names preserve plot IDs despite mixed padding and legacy metadata.
+local slotNames = { "BaseSlot_1", "BaseSlot_2", "BaseSlot_3", "BaseSlot_4", "BaseSlot_5",
+    "BaseSlot_06", "BaseSlot_07", "BaseSlot_08", "BaseSlot_09", "BaseSlot_10",
+    "BaseSlot_11", "BaseSlot_12", "BaseSlot_13" }
+for index, name in slotNames do
+    table.insert(plots, { Id = "base.plot_" .. index,
+        Path = { "Workspace", "Game", "Base", "Base_Models", "Base_Slots", name } })
 end
 return {
     Count = 13, StartingLevel = 1, MaxLevel = 4,

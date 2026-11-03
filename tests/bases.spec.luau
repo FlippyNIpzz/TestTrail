@@ -7,9 +7,16 @@ end
 local function folder(parent, name)
     local f = Instance.new("Folder"); f.Name = name; f.Parent = parent; return f
 end
-local bases = folder(workspace, "Bases")
-local sources = folder(bases, "NoGemBases")
-local placed = folder(bases, "PlacedBases")
+local bases = folder(folder(workspace, "Game"), "Base")
+local placed = folder(folder(bases, "Base_Models"), "Base_Slots")
+local sources = folder(storage, "PlotLevelModels")
+for level = 1, Config.MaxLevel do
+    local model = Instance.new("Model"); model.Name = "Base_Level_" .. level
+    local floor = Instance.new("Part"); floor.Name = "Floor"
+    floor.Size = Vector3.new(24 + level, 0.5, 28 + level)
+    floor.Anchored = true; floor.Parent = model; model.PrimaryPart = floor
+    model.Parent = sources
+end
 local originals = {}
 for index, definition in Config.Plots do
     local name = definition.Path[#definition.Path]
@@ -18,7 +25,7 @@ for index, definition in Config.Plots do
     floor.Size = Vector3.new(24 + index, 0.5 + index / 10, 28 + index)
     floor.CFrame = CFrame.new(index * 70, floor.Size.Y / 2, 0) * CFrame.Angles(0, index / 5, 0)
     floor.Anchored = true; floor.Parent = model; model.PrimaryPart = floor
-    model.Parent = if index <= 5 then sources else placed
+    model.Parent = placed
     originals[index] = { Model = model, Parent = model.Parent }
 end
 local function player(id, level, balance)

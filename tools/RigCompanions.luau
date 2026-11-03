@@ -103,7 +103,8 @@ local function rig(model)
 end
 local count=0
 for _,m in templates:GetChildren() do if m:IsA("Model") then rig(m) count+=1 task.wait() end end
-local gallery=workspace:FindFirstChild("Development") and workspace.Development:FindFirstChild("CompanionModelGallery")
+local gallery=workspace:FindFirstChild("Game") and workspace.Game:FindFirstChild("Companions")
+    and workspace.Game.Companions:FindFirstChild("CompanionModelGallery")
 if gallery then
     for _,m in gallery:GetChildren() do
         if m:IsA("Model") and templates:FindFirstChild(m.Name) then rig(m) count+=1 task.wait() end

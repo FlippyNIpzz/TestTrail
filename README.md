@@ -49,7 +49,7 @@ For new content, use the existing feature folder under Game, then a descriptive 
 
 ServerStorage currently holds runtime templates in CompanionModels, FacilityModels, ResourceModels, and PlotLevelModels, alongside historical backups. Workspace galleries and stored templates have different roles; inspect their consumers before deciding which copy to edit. ReplicatedStorage contains Shared.Features and a separate Gui tree. Studio models are separate from the filesystem src tree and are not mapped by the current Rojo project file.
 
-**Path compatibility found during review:** BaseConfig still references Workspace.Bases.NoGemBases and Workspace.Bases.PlacedBases, whereas authored models now live under Workspace.Game.Base.Base_Models. The existing slot names also mix padding (BaseSlot_1 versus BaseSlot_06), so migration must inspect names and ArenaSlotIndex attributes rather than assume a rename or sequential index. tools/RigCompanions.luau still looks for Workspace.Development.CompanionModelGallery; the observed gallery is now Workspace.Game.Companions.CompanionModelGallery. These consumers need reconciliation before relying on them. This review recorded the convention only; it did not move objects or update runtime paths.
+**Path reconciliation (2026-11-03):** BaseConfig now uses the 13 explicitly named models under Workspace.Game.Base.Base_Models.Base_Slots and ServerStorage.PlotLevelModels for replacement templates. Base_Levels remains a display/reference gallery. Runtime plot IDs remain base.plot_1 through base.plot_13; mixed name padding and BaseSlot_13's ArenaSlotIndex=14 are preserved. tools/RigCompanions.luau now targets Workspace.Game.Companions.CompanionModelGallery. No authored models were moved or renamed.
 
 ## Purpose
 
@@ -464,17 +464,58 @@ Every card displays separate stat bars for **Damage, Stamina, and Health**. Rari
 
 These are per-stat level caps, not starting values, a shared stat-point budget, or defined combat units. Starting values, progression rules, and conversion from stat levels to gameplay effects remain unspecified.
 
-Use the images in [Reference_Image](Reference_Image/) as visual references. All 16 cards must share consistent texturing, pixel size/density, and an overall art style so they visibly belong to the same game. Keep the pixel grid, shading treatment, border treatment, typography, and layout consistent across types and rarities; type and rarity variations must preserve that shared visual language. Exact pixel dimensions and rarity colors remain to be selected.
+Use the images in [Reference_Image](Assets/Reference_Image/) as visual references. All 16 cards must share consistent texturing, pixel size/density, and an overall art style so they visibly belong to the same game. Keep the pixel grid, shading treatment, border treatment, typography, and layout consistent across types and rarities; type and rarity variations must preserve that shared visual language. Exact pixel dimensions and rarity colors remain to be selected.
 
 ### Companion Rigs, IK, and Animation
 
-Implemented and playtested in Studio for all **16 companion templates** in `ServerStorage.CompanionModels` and their copies in `Workspace.Development.CompanionModelGallery`. Each model has 14 `Motor6D` joints, welded decorative parts, an `AnimationController`/`Animator`, and two foot `IKControl` chains with knee poles. Original templates are backed up in `ServerStorage.CompanionModels_BeforeIK`.
+Implemented and playtested in Studio for all **16 companion templates** in `ServerStorage.CompanionModels` and their copies in `Workspace.Game.Companions.CompanionModelGallery`. Each model has 14 `Motor6D` joints, welded decorative parts, an `AnimationController`/`Animator`, and two foot `IKControl` chains with knee poles. Original templates are backed up in `ServerStorage.CompanionModels_BeforeIK`.
 
 [CompanionAnimation.luau](src/client/Features/Companion/CompanionAnimation.luau), started by `Main.client.luau`, provides procedural idle, walking, and cosmetic attack poses without uploaded animation IDs. It adjusts foot targets to nearby ground heights and handles streamed models. This presentation currently also runs for authored gallery models while the optional Companion gameplay feature is disabled; ownership, equipping, following, and combat timing remain pending.
 
 To preview, select a gallery companion, set its `CompanionAnimationState` attribute to `Walk`, and press **Play**. Supported states are `Auto` (idle while stationary, walk when the root moves), `Idle`, `Walk`, and `Attack`. Set `CompanionAnimationEnabled` to `false` to reset poses and disable IK. `CompanionStride`, `CompanionStepHeight`, and `CompanionWalkSpeed` tune movement presentation. Foot IK supports small height changes; feet remain level rather than matching slope normals.
 
-See [Companion Animation Verification](COMPANION_ANIMATION_VERIFICATION.md) for Play-mode results, limitations, attributes, and source locations. [RigCompanions.luau](tools/RigCompanions.luau) reproduces the rig setup in Studio Edit mode. These changes have not been published to the experience.
+See [Companion Animation Verification](#companion-animation-verification) for Play-mode results, limitations, attributes, and source locations. [RigCompanions.luau](tools/RigCompanions.luau) reproduces the rig setup in Studio Edit mode. These changes have not been published to the experience.
+
+<a id="companion-animation-verification"></a>
+
+### Companion animation verification
+
+Implemented in CHAT, place 72056776360977, on 2026-10-27.
+
+- Rigged all 16 ServerStorage.CompanionModels templates and all 16 Workspace.Game.Companions.CompanionModelGallery copies, preserving authored parts and world positions.
+- Each rig has an anchored transparent CompanionRoot, 14 Motor6D joints, welded decorative parts, an AnimationController/Animator, and two native foot IKControls with knee poles. Other parts are unanchored, massless, and noncolliding.
+- Original templates are retained in ServerStorage.CompanionModels_BeforeIK. The existing pre-redesign backup is untouched.
+- Atomic model streaming and descendant arrival handling support streamed gallery models and future runtime clones.
+- CompanionAnimation runs as cosmetic client presentation from Main.client.luau, independently of the disabled companion ownership/gameplay feature. It never moves the root or grants gameplay effects.
+- Animation uses procedural joint poses; no uploaded Animation IDs are required. Existing movement code can move the model with PivotTo and Auto will detect horizontal root movement.
+
+#### Model attributes
+
+| Attribute | Values / purpose |
+| --- | --- |
+| CompanionAnimationEnabled | false resets poses and disables IK; true resumes |
+| CompanionAnimationState | Auto (default), Idle, Walk (in-place preview), Attack (looping cosmetic punch) |
+| CompanionStride | stride distance, default 0.5 studs |
+| CompanionStepHeight | foot lift, default 0.3 studs |
+| CompanionWalkSpeed | reference movement speed, default 6 studs/second |
+
+Select a gallery model and set CompanionAnimationState to Walk before pressing Play to preview walking in place. Auto uses idle poses while stationary. Attack is presentation only; gameplay must explicitly select/reset the state when combat is implemented.
+
+#### Live verification
+
+- Playtested all 16 gallery models: nonzero idle body offsets, enabled foot IK, and two-segment chains on every model.
+- Forced Walk and sampled changing shoulder angles and foot targets over time.
+- Added a temporary 0.3-stud step under the left foot: target rose from approximately 7.553 to 7.840 studs; actual foot center reached 7.845 studs. Removed the step afterward.
+- Disabled animation: body offset returned to zero and foot IK disabled. Re-enabled successfully.
+- Forced Attack: right shoulder pose changed to approximately -1.321 radians. Restored Auto.
+- Visually inspected gallery in Play mode: decorative parts remain attached.
+- No animation script errors were reported. Existing unrelated asset 203785492 emits asset-type mismatch warnings.
+- Returned Studio to Edit mode; temporary test attributes/parts did not persist.
+
+Limitations: short legs support small height corrections (clamped -0.5 to +0.45 studs), not large ledges. Feet remain level rather than matching slope normals. Follow movement, equip/deployment, and combat timing remain pending in the existing feature scaffold. This is local Studio work, not a published experience update.
+
+Reproduction helper: tools/RigCompanions.luau (run its contents in Studio Edit mode). Source: src/client/Features/Companion/CompanionAnimation.luau and startup wiring in src/client/Main.client.luau.
+
 
 ### Companion Concepts
 
@@ -712,53 +753,9 @@ Only `src/server/Main.server.luau` and `src/client/Main.client.luau` execute aut
 | [tests/run_player_data.py](tests/run_player_data.py) | Bundles actual source with mocked Roblox services and runs the player_data suite using a Luau CLI. |
 | [tests/run_resources.py](tests/run_resources.py) | Builds an isolated Studio loadstring bundle from actual source and the resources regression fixtures. |
 
-### Archived source and documentation
+### Historical source
 
-| File | Feature / current use |
-| --- | --- |
-| [archive/pre-foundation-src/client/Controllers/ArenaController.luau](archive/pre-foundation-src/client/Controllers/ArenaController.luau) | Arena entry/exit, status, and event-timer client API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/client/Controllers/BaseController.luau](archive/pre-foundation-src/client/Controllers/BaseController.luau) | Facility placement, base upgrade, and base GUI request stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/client/Controllers/CompanionController.luau](archive/pre-foundation-src/client/Controllers/CompanionController.luau) | Companion activation, behavior, upgrade, fusion, and GUI request stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/client/Controllers/InventoryController.luau](archive/pre-foundation-src/client/Controllers/InventoryController.luau) | Inventory open/close, state request, and GUI refresh stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/client/Main.client.luau](archive/pre-foundation-src/client/Main.client.luau) | Previous automatic client bootstrap requiring and initializing legacy controllers. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/Base/Base.luau](archive/pre-foundation-src/gui/Base/Base.luau) | Empty Base GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/Companion/Companion.luau](archive/pre-foundation-src/gui/Companion/Companion.luau) | Empty Companion GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/Forge/Forge.luau](archive/pre-foundation-src/gui/Forge/Forge.luau) | Empty Forge GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/HUD/HUD.luau](archive/pre-foundation-src/gui/HUD/HUD.luau) | Empty HUD GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/Inventory/Inventory.luau](archive/pre-foundation-src/gui/Inventory/Inventory.luau) | Empty Inventory GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/Printer/Printer.luau](archive/pre-foundation-src/gui/Printer/Printer.luau) | Empty Printer GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/RepairStation/RepairStation.luau](archive/pre-foundation-src/gui/RepairStation/RepairStation.luau) | Empty RepairStation GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/gui/Smithy/Smithy.luau](archive/pre-foundation-src/gui/Smithy/Smithy.luau) | Empty Smithy GUI placeholder; contains no interface implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Main.server.luau](archive/pre-foundation-src/server/Main.server.luau) | Previous server bootstrap wiring world services, player loading/spawning, departure, and shutdown. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Arena/ArenaEventService.luau](archive/pre-foundation-src/server/Services/Arena/ArenaEventService.luau) | Legacy arena construction and participant/defeat handling; despite its filename, returns ArenaService. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Arena/ArenaService.luau](archive/pre-foundation-src/server/Services/Arena/ArenaService.luau) | Arena membership and defeat/drop API scaffold. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Base/BaseService.luau](archive/pre-foundation-src/server/Services/Base/BaseService.luau) | Legacy circular base construction, assignment, spawn, rebuild, and release. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Base/PlacementService.luau](archive/pre-foundation-src/server/Services/Base/PlacementService.luau) | Facility placement, zone unlocking, and restoration API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Companion/CarrierService.luau](archive/pre-foundation-src/server/Services/Companion/CarrierService.luau) | Carrier crafting/opening and odds/recipe API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Companion/CompanionBehavior.luau](archive/pre-foundation-src/server/Services/Companion/CompanionBehavior.luau) | Base/Follow/Arena behavior and movement API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Companion/CompanionCombat.luau](archive/pre-foundation-src/server/Services/Companion/CompanionCombat.luau) | Companion targeting, attacks, damage, and status API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Companion/CompanionService.luau](archive/pre-foundation-src/server/Services/Companion/CompanionService.luau) | Companion ownership, activation, spawning, and stats API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Companion/FusionService.luau](archive/pre-foundation-src/server/Services/Companion/FusionService.luau) | Companion fusion validation/calculation/preview API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Facilities/ForgeService.luau](archive/pre-foundation-src/server/Services/Facilities/ForgeService.luau) | Timed resource refining and output collection API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Facilities/PrinterService.luau](archive/pre-foundation-src/server/Services/Facilities/PrinterService.luau) | Companion upgrade/healing API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Facilities/RepairStationService.luau](archive/pre-foundation-src/server/Services/Facilities/RepairStationService.luau) | Item repair and repair-cost/status API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Facilities/SmithyService.luau](archive/pre-foundation-src/server/Services/Facilities/SmithyService.luau) | Item crafting, recipe, and output collection API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Inventory/InventoryService.luau](archive/pre-foundation-src/server/Services/Inventory/InventoryService.luau) | Legacy categorized inventory add/remove/query API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Player/PlayerDataService.luau](archive/pre-foundation-src/server/Services/Player/PlayerDataService.luau) | Previous game-specific profile loading, update, autosave, and saving implementation. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Player/ProgressionService.luau](archive/pre-foundation-src/server/Services/Player/ProgressionService.luau) | Previous cash and rebirth progression operations. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Resources/ResourceDropService.luau](archive/pre-foundation-src/server/Services/Resources/ResourceDropService.luau) | Carried-resource drop, pickup eligibility, and expiration API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Resources/ResourceService.luau](archive/pre-foundation-src/server/Services/Resources/ResourceService.luau) | Collection, carrying, deposit, and processing API stubs. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/server/Services/Resources/ResourceSpawner.luau](archive/pre-foundation-src/server/Services/Resources/ResourceSpawner.luau) | Legacy spawn initialization, timed loop, and spawn/removal API. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Configs/ArenaConfig.luau](archive/pre-foundation-src/shared/Configs/ArenaConfig.luau) | Previous Arena settings/content definitions. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Configs/BaseConfig.luau](archive/pre-foundation-src/shared/Configs/BaseConfig.luau) | Previous Base settings/content definitions. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Configs/CompanionConfig.luau](archive/pre-foundation-src/shared/Configs/CompanionConfig.luau) | Previous Companion settings/content definitions. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Configs/FacilityConfig.luau](archive/pre-foundation-src/shared/Configs/FacilityConfig.luau) | Previous Facility settings/content definitions. Historical zone assignments include Smithy in Zone 2; superseded by the current Refinery assignment above. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Configs/GameConfig.luau](archive/pre-foundation-src/shared/Configs/GameConfig.luau) | Previous Game settings/content definitions. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Configs/ProgressionConfig.luau](archive/pre-foundation-src/shared/Configs/ProgressionConfig.luau) | Previous Progression settings/content definitions. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Configs/ResourceConfig.luau](archive/pre-foundation-src/shared/Configs/ResourceConfig.luau) | Previous Resource settings/content definitions. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Data/PlayerDataTemplate.luau](archive/pre-foundation-src/shared/Data/PlayerDataTemplate.luau) | Previous game-specific save defaults. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Network/NetworkManager.luau](archive/pre-foundation-src/shared/Network/NetworkManager.luau) | Legacy remote creation and event/function lookup. Archived reference only; excluded from active startup. |
-| [archive/pre-foundation-src/shared/Utility/TableUtil.luau](archive/pre-foundation-src/shared/Utility/TableUtil.luau) | Legacy recursive table copying and default reconciliation. Archived reference only; excluded from active startup. |
+The previous architecture is preserved in [baseline commit 71ba3d6](https://github.com/FlippyNIpzz/TestTrail/tree/71ba3d6/archive/pre-foundation-src). It is no longer present in the working tree and has no runtime role. See [Archived source](#archived-source) for recovery instructions.
 
 <a id="delivery-checklist"></a>
 
@@ -845,7 +842,7 @@ Currency and Inventory now implement validated server operations and atomic sale
 
 Arena resource generation now has a server-owned spawner; see [Resource generation verification](#resources-verification) for configuration, API, results and pending Studio checks. Server-carried quantity state and arena movement are implemented; contact collection, carry visuals and deposit remain placeholders. Base now implements authored plot ownership, saved-level structure restoration, respawn placement, and transactional structure upgrades; see [Base upgrades verification](#base-upgrades-verification). Building placement/restoration, Facilities, generic Upgrades, and the remaining game UI are placeholders. Companion, Combat, Arena, and Rebirth are disabled. There is no playable example or general gameplay state synchronization yet. Enabling a feature switch includes it in startup; it is not a declaration of completeness.
 
-`archive/pre-foundation-src` preserves previous source outside the Rojo tree. Port deliberately instead of running its bootstrap alongside this one.
+Legacy source is preserved in baseline commit `71ba3d6`, outside the current working tree. Port deliberately instead of restoring its bootstrap alongside active startup.
 
 ### Validation
 
@@ -1149,4 +1146,17 @@ The Vendor subdirectory is isolated third-party code, an exception to the flat f
 
 ## Archived source
 
-`archive/pre-foundation-src` preserves every original Luau file, including uncommitted player-data work, before the architecture migration. These files are outside the Rojo source tree and do not execute. They are reference material, not the active implementation.
+The legacy `archive/pre-foundation-src` directory was removed after baseline commit `71ba3d6` was pushed to GitHub. That commit preserves all 43 legacy Luau files, including player-data work that was absent from the initial scaffold. The game has no dependency on the archive.
+
+Browse the [preserved archive](https://github.com/FlippyNIpzz/TestTrail/tree/71ba3d6/archive/pre-foundation-src), or recover an individual file with `git show 71ba3d6:archive/pre-foundation-src/<relative-path>`. Avoid restoring the old automatic startup scripts into the active Rojo tree.
+
+
+## Repository baseline and backup — 2026-11-03
+
+The pre-cleanup source, tests, artwork, verification documents, licenses and complete legacy archive are preserved in commit `71ba3d6` on `feature/player-data`. The baseline was pushed successfully before removing the archive in the cleanup commit. Legacy files can be recovered from `71ba3d6:archive/pre-foundation-src` when needed.
+
+A local Studio Download a Copy backup was saved before cleanup at `backups/Scaffolding-Tycoon-2026-11-03-before-cleanup.rbxl` (571 KB). This directory is ignored by Git. It contains the current authored scene; the Rojo build only packages mapped source and cannot replace this scene backup. Keep an additional copy outside this machine for recovery.
+
+Base configuration was reconciled against the live Edit hierarchy without changing authored objects, transforms, names or attributes. All 13 plot paths, four stored replacement templates and the companion gallery resolved. The updated isolated base fixtures passed 16 regression tests in Studio; Rojo packaging and whitespace checks passed. These checks do not establish multiplayer, GUI or persistence readiness.
+
+The standalone economy and companion verification files were consolidated into this README. Earlier dated verification records are historical evidence, not a fresh test run. Resource collection, owned deposits and processing remain the next implementation work.
