@@ -1,17 +1,38 @@
 --!strict
+-- Main Server Execution Entry Point (Layer 4)
 
--- Foundation scaffold entry point. Gameplay remains unavailable until services are implemented.
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Shared = ReplicatedStorage:WaitForChild("Shared")
-local GameConfig = require(Shared.Features.Game.GameConfig)
-local Lifecycle = require(Shared.Features.Lifecycle.LifecycleHelpers)
-local order = { "Networking", "PlayerData", "Currency", "Inventory", "Base", "Resources", "Facilities", "Upgrades", "UI", "Companion", "Combat", "Arena", "Rebirth", "Admin" }
-local modules = {}
-for _, name in order do
-    if GameConfig.Features[name] then
-        table.insert(modules, require(script.Parent.Features[name][name .. "Server"]))
-    end
+local ServerScriptService = game:GetService("ServerScriptService")
+local Server = ServerScriptService:WaitForChild("Server")
+
+-- Require Managers (Layer 3)
+local BaseManager = require(Server:WaitForChild("Base"):WaitForChild("BaseManager"))
+local BaseAssetManager = require(Server:WaitForChild("Base"):WaitForChild("BaseAssetManager"))
+local PlayerDataManager = require(Server:WaitForChild("PlayerData"):WaitForChild("PlayerDataModule"))
+
+local Arena = require(Server:WaitForChild("Arena"):WaitForChild("Arena"))
+
+local function initializeServer()
+	print("[MainServer]: Starting server initialization...")
+
+	-- 1. Initialize Player Data system first
+	if PlayerDataManager.Init then
+		PlayerDataManager.Init()
+	end
+
+	-- 2. Initialize the 13 base spots and zone placement structure
+	if BaseManager.InitializeBases then
+		BaseManager.InitializeBases()
+	end
+
+	-- 3. Initialize Base Assets (Forge processing & Charge Station power loops)
+	if BaseAssetManager.Init then
+		BaseAssetManager.Init()
+	end
+
+	Arena.Init()
+	require(Server.Arena.ArenaCarryManager).Init()
+
+	print("[MainServer]: All systems successfully initialized.")
 end
-local destroy = Lifecycle.Run(modules, { GameConfig = GameConfig, Shared = Shared, Features = script.Parent.Features })
-script.Destroying:Connect(destroy)
-warn("[Foundation] Player sessions initialized. Gameplay services remain under construction.")
+
+initializeServer()
