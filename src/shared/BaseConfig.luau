@@ -22,7 +22,7 @@ Config.ChargeTiers = {
     { ModelName = "ChargeStation_Level_3", MaxPower = 350, Rate = 20, Name = "Charge Station Level 3", Cost = 0, RequiredBaseLevel = 1 },
 }
 export type BaseLevel = { Name: string, Description: string, Cost: number, RequiredTier: number }
--- Milestones only: existing facility access remains available at Base level 1.
+-- Each level uses Base_Level_<level>; existing facility access remains available at Base level 1.
 Config.BaseLevels = {
     { Name = "Starter", Description = "Forge and charging station available", Cost = 0, RequiredTier = 0 },
     { Name = "Established", Description = "Requires both facilities purchased", Cost = 0, RequiredTier = 1 },

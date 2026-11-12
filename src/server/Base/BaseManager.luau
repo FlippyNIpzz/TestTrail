@@ -1,5 +1,5 @@
 --!strict
--- Runtime plot ownership and placement. Never reposition Zones or replace a base for progression.
+-- Runtime ownership and authored placement. Base upgrades migrate facilities to matching new zones.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
@@ -9,6 +9,7 @@ local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Data = require(script.Parent.Parent.PlayerData.PlayerDataModule)
 local BaseData = require(script.Parent.BaseData)
 local BaseUtils = require(script.Parent.BaseUtils)
+local ZoneCatalog = require(script.Parent.BaseZoneCatalog)
 local BaseManager = {}
 export type BaseAssignment = {
     Player: Player?, Index: number, Position: Vector3, CFrame: CFrame, IsPathway: boolean,
@@ -43,6 +44,13 @@ function BaseManager.IsOwner(player: Player, index: number): boolean
 end
 function BaseManager.SetAssetCreatedCallback(callback: ((Player, string, Instance) -> ())?) assetCreatedCallback = callback end
 function BaseManager.GetAssetFolder(name: string): Instance? return assetsFolder:FindFirstChild(name) end
+function BaseManager.GetZoneCatalog(): { ZoneCatalog.LevelInfo }
+    return ZoneCatalog.Levels(baseModelsFolder)
+end
+function BaseManager.GetPlayerZones(player: Player): ({ ZoneCatalog.ZoneInfo }, string?)
+    local base = BaseManager.GetBaseForPlayer(player)
+    return ZoneCatalog.Read(if base then base.Model else nil)
+end
 function BaseManager.Near(player: Player, position: Vector3): boolean
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -135,6 +143,8 @@ local function place(player: Player, zonePart: BasePart, placed: Instance): bool
     local config = Config.Zones[zonePart.Name]
     if not config or not config.Available then return false end
     local existing = placed:FindFirstChild(zonePart.Name)
+    if existing and existing:GetAttribute("BaseOwnerUserId") == player.UserId
+        and existing:GetAttribute("BaseFacilityReady") == true then return true end
     local pivot = zonePart.CFrame
     if existing then
         if not (existing:IsA("Model") or existing:IsA("BasePart")) then return false end
@@ -214,13 +224,143 @@ local function setupZonePrompts(base: BaseAssignment)
         end)
     end
 end
+-- Validate the exact next-level template before touching the live base.
+local function requiredZones(purchased: { [string]: boolean }, placed: Instance?): { [string]: boolean }
+    local required: { [string]: boolean } = {}
+    for name, config in pairs(Config.Zones) do
+        if config.Available then required[name] = true end
+    end
+    for name, owned in pairs(purchased) do if owned then required[name] = true end end
+    if placed then
+        for _, asset in ipairs(placed:GetChildren()) do required[asset.Name] = true end
+    end
+    return required
+end
+local function validateLayout(level: number, required: { [string]: boolean }): (Model?, string)
+    local name = "Base_Level_" .. level
+    local template = baseModelsFolder:FindFirstChild(name)
+    if not template or not template:IsA("Model") or not template.Archivable or not primary(template) then
+        return nil, name .. " is unavailable or invalid."
+    end
+    for _, item in ipairs(template:GetDescendants()) do
+        if not item.Archivable then return nil, name .. " contains non-archivable content." end
+    end
+    local zones = template:FindFirstChild("Zones")
+    if not zones then return nil, name .. " is missing Zones." end
+    local found: { [string]: boolean } = {}
+    local seen: { [string]: boolean } = {}
+    for _, zone in ipairs(zones:GetChildren()) do
+        if seen[zone.Name] then return nil, name .. " has duplicate zone " .. zone.Name .. "." end
+        seen[zone.Name] = true
+        if zone:IsA("BasePart") then found[zone.Name] = true end
+    end
+    for zone in pairs(required) do
+        if not found[zone] then return nil, name .. " is missing zone " .. zone .. "." end
+    end
+    local placed = template:FindFirstChild("PlacedAssets")
+    if placed and not placed:IsA("Folder") then return nil, name .. " has an invalid PlacedAssets folder." end
+    return template, ""
+end
+function BaseManager.GetLayoutAvailability(player: Player, level: number): (boolean, string)
+    local base = BaseManager.GetBaseForPlayer(player)
+    if not base then return false, "Base is not ready." end
+    local placed = base.Model and base.Model:FindFirstChild("PlacedAssets")
+    local template, reason = validateLayout(level, requiredZones(base.PurchasedZones, placed))
+    return template ~= nil, reason
+end
+local function replaceOwnedBase(player: Player, base: BaseAssignment, level: number): (boolean, string)
+    local old = base.Model
+    if not old then return false, "Current base is unavailable." end
+    local oldPlaced = old:FindFirstChild("PlacedAssets")
+    local required = requiredZones(base.PurchasedZones, oldPlaced)
+    local template, reason = validateLayout(level, required)
+    if not template then return false, reason end
+    -- Every current asset must be movable and uniquely mapped; never silently drop one.
+    local names: { [string]: boolean } = {}
+    local moves: { { Asset: PVInstance, Parent: Instance, Pivot: CFrame } } = {}
+    if oldPlaced then
+        for _, asset in ipairs(oldPlaced:GetChildren()) do
+            if not (asset:IsA("Model") or asset:IsA("BasePart")) or names[asset.Name] then
+                return false, "Cannot safely map placed asset " .. asset.Name .. "."
+            end
+            if base.PurchasedZones[asset.Name] and (asset:GetAttribute("BaseOwnerUserId") ~= player.UserId
+                or asset:GetAttribute("BaseFacilityReady") ~= true) then
+                return false, "Restore " .. asset.Name .. " before upgrading the base."
+            end
+            names[asset.Name] = true
+            table.insert(moves, { Asset = asset :: PVInstance, Parent = oldPlaced, Pivot = (asset :: PVInstance):GetPivot() })
+        end
+    end
+    local model = template:Clone()
+    model.Name = old.Name
+    model:PivotTo(base.CFrame)
+    model:SetAttribute("BaseIndex", base.Index)
+    model:SetAttribute("BaseOwnerUserId", player.UserId)
+    model:SetAttribute("BaseLevel", level)
+    local zones = model:FindFirstChild("Zones") :: Instance
+    local placed: Instance = model:FindFirstChild("PlacedAssets") or Instance.new("Folder", model)
+    placed.Name = "PlacedAssets"
+    -- Template placeholders must not duplicate purchased/live facilities.
+    for _, placeholder in ipairs(placed:GetChildren()) do
+        if names[placeholder.Name] or base.PurchasedZones[placeholder.Name] then placeholder:Destroy() end
+    end
+    local restored: { Instance } = {}
+    for zone, owned in pairs(base.PurchasedZones) do
+        if not owned or names[zone] then continue end
+        local config = Config.Zones[zone]
+        if not config or not config.Available then model:Destroy(); return false, "Cannot restore owned facility " .. zone .. "." end
+        local target = zones:FindFirstChild(zone) :: BasePart
+        local asset = prepare(BaseManager.GetAssetFolder(config.Folder), savedTemplate(player, zone), target.CFrame)
+        if not asset then model:Destroy(); return false, "Cannot restore " .. config.Name .. "; its saved-tier template is unavailable." end
+        asset.Name = zone
+        asset:SetAttribute("BaseOwnerUserId", player.UserId)
+        asset:SetAttribute("BaseFacilityReady", true)
+        asset:SetAttribute("RuntimeBaseAsset", true)
+        asset.Parent = placed
+        table.insert(restored, asset)
+    end
+    local ok, failure = pcall(function()
+        -- No yields: migrate the actual instances, preserving prompts and station registration.
+        for _, move in ipairs(moves) do
+            local target = zones:FindFirstChild(move.Asset.Name) :: BasePart
+            move.Asset.Parent = placed
+            move.Asset:PivotTo(target.CFrame)
+        end
+        base.Model = model
+        model.Parent = basesFolder
+        for _, asset in ipairs(restored) do
+            if assetCreatedCallback then assetCreatedCallback(player, asset.Name, asset) end
+        end
+        setupZonePrompts(base)
+    end)
+    if not ok then
+        base.Model = old
+        for _, move in ipairs(moves) do
+            move.Asset.Parent = move.Parent
+            move.Asset:PivotTo(move.Pivot)
+        end
+        model:Destroy()
+        warn("[BaseManager] Base upgrade rolled back: " .. tostring(failure))
+        return false, "Unable to prepare the next base. Your current base and facilities were preserved."
+    end
+    old:Destroy()
+    return true, ""
+end
 local function updateBaseModel(base: BaseAssignment, layout: number): boolean
     if base.Model and base.Model:GetAttribute("PreserveAuthoredBase") == true and not base.LayoutTemplate then
         warn("[BaseManager] Authored base is not archivable; cannot safely assign or reset it.")
         return false
     end
-    local template = base.LayoutTemplate or baseModelsFolder:FindFirstChild("Base_Level_" .. layout)
-        or baseModelsFolder:FindFirstChild("Base_Level_1") or baseModelsFolder:FindFirstChild("Base_Level_0")
+    local template: Instance? = nil
+    if layout > 1 then
+        -- Saved progression must restore its actual layout, never silently fall back to level 1.
+        local exact, reason = validateLayout(layout, requiredZones(base.PurchasedZones, nil))
+        if not exact then warn("[BaseManager] " .. reason); return false end
+        template = exact
+    else
+        template = base.LayoutTemplate or baseModelsFolder:FindFirstChild("Base_Level_" .. layout)
+            or baseModelsFolder:FindFirstChild("Base_Level_1") or baseModelsFolder:FindFirstChild("Base_Level_0")
+    end
     if not template or not template:IsA("Model") or not template.Archivable then return false end
     if base.LayoutTemplate then
         for _, item in ipairs(template:GetDescendants()) do
@@ -231,6 +371,15 @@ local function updateBaseModel(base: BaseAssignment, layout: number): boolean
     model.Name = "Base_" .. base.Index
     model:PivotTo(base.CFrame)
     model:SetAttribute("BaseIndex", base.Index)
+    model:SetAttribute("BaseLevel", layout)
+    if layout > 1 then
+        local placeholders = model:FindFirstChild("PlacedAssets")
+        if placeholders then
+            for _, asset in ipairs(placeholders:GetChildren()) do
+                if base.PurchasedZones[asset.Name] then asset:Destroy() end
+            end
+        end
+    end
     local old = base.Model
     base.Model = model
     model.Parent = basesFolder
@@ -270,8 +419,9 @@ function BaseManager.AssignBase(player: Player): number?
     for index = 1, BaseData.BASE_COUNT do
         local base = bases[index]
         if base and not base.Player then
-            if not updateBaseModel(base, 1) then continue end
-            base.Player = player; base.Level = saved.Level; base.PurchasedZones = saved.PurchasedZones
+            base.PurchasedZones = saved.PurchasedZones
+            if not updateBaseModel(base, saved.Level) then base.PurchasedZones = {}; continue end
+            base.Player = player; base.Level = saved.Level
             playerToBase[player] = index
             local model = base.Model
             if model then model:SetAttribute("BaseOwnerUserId", player.UserId) end
@@ -305,10 +455,12 @@ function BaseManager.UpgradeBase(player: Player): Result
             or state.Forge.Tier < nextLevel.RequiredTier or state.ChargeStation.Tier < nextLevel.RequiredTier then
             return { Success = false, Message = nextLevel.Description .. "." }
         end
+        local replaced, failure = replaceOwnedBase(player, base, state.Level + 1)
+        if not replaced then return { Success = false, Message = failure } end
         BaseManager.Spend(player, nextLevel.Cost)
         state.Level += 1; base.Level = state.Level
         player:SetAttribute("BaseLevel", state.Level)
-        return { Success = true, Message = ("Base upgraded to level %d. Facility access is unchanged."):format(state.Level) }
+        return { Success = true, Message = ("Base upgraded to level %d. Facilities moved to their new zones."):format(state.Level) }
     end)
 end
 return BaseManager

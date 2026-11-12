@@ -61,7 +61,8 @@ function Arena.TryCollectOre(player: Player, ore: BasePart): (boolean, string?)
 	registered[ore] = nil
 	lastCollection[player] = now
 	local dropped = dropInfo[ore]
-	Inventory.AddItem(player, oreId, if dropped then dropped.Amount else Config.Ores[oreId].Amount)
+	local amount = if dropped then dropped.Amount else (if Config.Ores[oreId] then Config.Ores[oreId].Amount else 1)
+	Inventory.AddItem(player, oreId, amount)
 	ore:Destroy()
 	return true, nil
 end
@@ -184,6 +185,8 @@ function Arena.Stop()
 	runtime, ores, bosses, drops = nil, nil, nil, nil
 	table.clear(dropInfo)
 	modeIndex = 0
+	endsAt = 0
+	nextSpawn = 0
 	nextPickup = 0
 	table.clear(registered)
 	table.clear(lastCollection)
@@ -195,15 +198,22 @@ function Arena.Init()
 	folder.Name = "RuntimeArena"
 	folder.Parent = workspace
 	runtime = folder
-	ores = Instance.new("Folder")
-	ores.Name = "Ores"
-	ores.Parent = folder
-	drops = Instance.new("Folder")
-	drops.Name = "Drops"
-	drops.Parent = folder
-	bosses = Instance.new("Folder")
-	bosses.Name = "Bosses"
-	bosses.Parent = folder
+
+	local oresFolder = Instance.new("Folder")
+	oresFolder.Name = "Ores"
+	oresFolder.Parent = folder
+	ores = oresFolder
+
+	local dropsFolder = Instance.new("Folder")
+	dropsFolder.Name = "Drops"
+	dropsFolder.Parent = folder
+	drops = dropsFolder
+
+	local bossesFolder = Instance.new("Folder")
+	bossesFolder.Name = "Bosses"
+	bossesFolder.Parent = folder
+	bosses = bossesFolder
+
 	folder:SetAttribute("Mode", "WaitingForArena")
 	leaving = Players.PlayerRemoving:Connect(function(player) lastCollection[player] = nil end)
 	connection = RunService.Heartbeat:Connect(function()
@@ -214,10 +224,13 @@ function Arena.Init()
 		if not bounds then
 			if modeIndex ~= 0 then
 				if drops then drops:ClearAllChildren() end
+				table.clear(dropInfo)
 				table.clear(registered)
 				if ores then ores:ClearAllChildren() end
 				if bosses then bosses:ClearAllChildren() end
 				modeIndex = 0
+				endsAt = 0
+				nextSpawn = 0
 			end
 			folder:SetAttribute("Mode", "WaitingForArena")
 			folder:SetAttribute("TimeRemaining", 0)

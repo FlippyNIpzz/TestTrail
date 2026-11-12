@@ -51,17 +51,41 @@ local function view(player: Player)
             end
         else table.insert(lines, ("%s: Purchase at its zone | %s | Base %d"):format(config.Name, Config.CostText(config.Cost), config.RequiredBaseLevel)) end
     end
-    table.insert(lines, "Command Terminal / Inspector: Coming soon")
+    table.insert(lines, "\nYOUR BASE ZONES")
+    local currentZones, zoneIssue = BaseManager.GetPlayerZones(player)
+    if zoneIssue then table.insert(lines, zoneIssue) end
+    for _, zone in ipairs(currentZones) do
+        local asset = placed and placed:FindFirstChild(zone.Id)
+        local status = if zone.Issue then zone.Issue
+            elseif state.PurchasedZones[zone.Id] then
+                (if asset and asset:GetAttribute("BaseOwnerUserId") == player.UserId then "Placed" else "Owned — restore at zone")
+            else "Place once at zone"
+        table.insert(lines, ("%s — %s | %s"):format(zone.Id, zone.AssetType, status))
+    end
+    table.insert(lines, "\nZONES BY BASE LEVEL")
+    for _, layout in ipairs(BaseManager.GetZoneCatalog()) do
+        table.insert(lines, ("Level %d%s"):format(layout.Level, if layout.Level == state.Level then " (current level)" else ""))
+        if layout.Issue then table.insert(lines, layout.Issue) end
+        for _, zone in ipairs(layout.Zones) do
+            local added = table.find(layout.Added, zone.Id) ~= nil
+            table.insert(lines, ("%s%s — %s%s"):format(if added then "NEW: " else "", zone.Id,
+                zone.AssetType, if zone.Issue then " | " .. zone.Issue else ""))
+        end
+        if #layout.Removed > 0 then table.insert(lines, "Not carried forward: " .. table.concat(layout.Removed, ", ")) end
+    end
     local nextLevel = Config.BaseLevels[state.Level + 1]
     local canUpgrade = false
     local upgradeText = "MAX BASE LEVEL"
     if nextLevel then
         local ready = state.PurchasedZones.Zone1 == true and state.PurchasedZones.Zone2 == true
             and state.Forge.Tier >= nextLevel.RequiredTier and state.ChargeStation.Tier >= nextLevel.RequiredTier
-        canUpgrade = ready and profile ~= nil and profile.Cash >= nextLevel.Cost
+        local layoutReady, layoutReason = BaseManager.GetLayoutAvailability(player, state.Level + 1)
+        canUpgrade = ready and layoutReady and profile ~= nil and profile.Cash >= nextLevel.Cost
+        if not layoutReady then table.insert(lines, "\n" .. layoutReason) end
         upgradeText = ("UPGRADE TO LEVEL %d | %s"):format(state.Level + 1, Config.CostText(nextLevel.Cost))
         table.insert(lines, "\nNext Base milestone: " .. nextLevel.Name)
         table.insert(lines, nextLevel.Description .. (if ready then " — Met" else " — Not met"))
+        table.insert(lines, "Your facilities move to matching zones on the new base.")
         table.insert(lines, "Upgrade near the center of your base.")
     end
     return { Ready = true, Level = state.Level, Details = table.concat(lines, "\n"), UpgradeText = upgradeText, CanUpgrade = canUpgrade }

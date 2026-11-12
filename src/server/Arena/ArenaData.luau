@@ -1,6 +1,36 @@
 --!strict
 -- Temporary testing balance. Boss names refer to ServerStorage.ArenaBosses templates.
-return {
+
+export type OreConfig = {
+	Color: Color3,
+	Amount: number,
+}
+
+export type ArenaMode = {
+	Name: string,
+	Duration: number,
+	SpawnInterval: number,
+	MaxOres: number,
+	Ores: { string },
+	Bosses: { string },
+}
+
+export type ArenaConfig = {
+	InteractionDistance: number,
+	PickupScanInterval: number,
+	DefaultWalkSpeed: number,
+	CollectionCooldown: number,
+	SpawnInset: number,
+	SpeedPenaltyPerOre: number,
+	MinimumCarrySpeed: number,
+	DropPickupDelay: number,
+	DropLifetime: number,
+	MaxVisibleStack: number,
+	Ores: { [string]: OreConfig },
+	Modes: { ArenaMode },
+}
+
+local Config: ArenaConfig = {
 	InteractionDistance = 6, -- Automatic pickup radius in studs.
 	PickupScanInterval = 0.1,
 	DefaultWalkSpeed = 16,
@@ -25,3 +55,5 @@ return {
 			Ores = { "CopperOre", "GoldOre" }, Bosses = { "IronGolem" } },
 	},
 }
+
+return Config

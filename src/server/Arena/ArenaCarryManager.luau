@@ -7,19 +7,28 @@ local Inventory = require(script.Parent.Parent.PlayerData.Inventory)
 local Data = require(script.Parent.Parent.PlayerData.PlayerDataModule)
 local World = require(script.Parent.Parent.Companion.CompanionWorld)
 local Carry = {}
-local states: {[Player]: any} = {}
+type PlayerState = {
+	character: Model,
+	humanoid: Humanoid,
+	count: number,
+	appliedSpeed: number?,
+	healthConnection: RBXScriptConnection?,
+	stack: Folder?,
+}
+local states: { [Player]: PlayerState } = {}
 local connections: {RBXScriptConnection} = {}
 
-local function release(state)
+local function release(state: PlayerState)
 	if state.healthConnection then state.healthConnection:Disconnect() end
 	if state.humanoid and state.appliedSpeed and state.humanoid.WalkSpeed == state.appliedSpeed then
 		state.humanoid.WalkSpeed = Config.DefaultWalkSpeed
 	end
-	if state.stack then state.stack:Destroy() end
+	if state.stack then state.stack:Destroy(); state.stack = nil end
 end
 
-local function rebuildStack(state, character: Model, root: BasePart, count: number)
-	if state.stack then state.stack:Destroy() end
+local function rebuildStack(state: PlayerState, character: Model, root: BasePart, count: number)
+	if state.stack then state.stack:Destroy(); state.stack = nil end
+	if count <= 0 then return end
 	local stack = Instance.new("Folder")
 	stack.Name = "CarriedOreStack"
 	stack.Parent = character
@@ -63,20 +72,26 @@ function Carry.Step()
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
-		local state = states[player]
-		if state and (state.character ~= character or state.humanoid ~= humanoid) then
-			release(state); states[player] = nil; state = nil
+		local existingState: PlayerState? = states[player]
+		if existingState and (existingState.character ~= character or existingState.humanoid ~= humanoid) then
+			release(existingState)
+			states[player] = nil
+			existingState = nil
 		end
 		if not character or not root or not root:IsA("BasePart") or not humanoid then continue end
-		if not state then
-			state = {character = character, humanoid = humanoid, count = -1}
-			states[player] = state
+		local state: PlayerState
+		if existingState then
+			state = existingState
+		else
+			local newState: PlayerState = {character = character, humanoid = humanoid, count = -1}
 			local previousHealth = humanoid.Health
-			state.healthConnection = humanoid.HealthChanged:Connect(function(health)
+			newState.healthConnection = humanoid.HealthChanged:Connect(function(health)
 				local damaged = health < previousHealth
 				previousHealth = health
 				if damaged and player.Character == character then Arena.DropCarriedOre(player) end
 			end)
+			states[player] = newState
+			state = newState
 		end
 		local count = 0
 		if Data.GetProfile(player) then

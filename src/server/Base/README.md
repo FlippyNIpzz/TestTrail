@@ -4,9 +4,11 @@
 
 - Initial facility placement uses the authored `Zones/Zone1` (forge) or `Zones/Zone2` (station) CFrame. No guessed offsets, footprint adjustments, or zone movement are applied.
 - An already authored facility under `PlacedAssets/Zone1` or `Zone2` retains its pivot when its saved tier is restored. Facility upgrades retain the current world pivot.
-- Existing `Workspace/World/Bases/Base_<index>` models supply their own plot pivots and layouts. Assignment/release clones that layout rather than relocating it onto the generated circle. Non-archivable authored layouts are skipped rather than replaced with a fallback that could lose content.
+- Existing `Workspace/World/Bases/Base_<index>` models supply their own plot pivots and starting layouts. Level-1 assignment/release retains that layout. Higher saved levels use their exact `Base_Level_<level>` template at the same plot pivot. Non-archivable authored layouts are skipped rather than replaced with a fallback that could lose content.
 - Where no authored numbered plot exists, the existing 13-base/radius-125 layout and level-0/level-1 templates remain in use. Spot 14 remains reserved for the pathway.
-- Base progression changes saved level only. It does not replace a physical base, shift zones, or move facilities. Model pivot inconsistencies must be corrected through Studio AI Assistant by the user; code does not guess corrections.
+- Base upgrades clone the exact `Assets/Base_Models/Base_Level_<next level>` template at the existing plot pivot. Existing facility instances move to matching zone CFrames in the replacement, retaining tier, contents, power, prompts, and station registration. Owned-but-missing facilities restore from saved-tier templates. Only after setup succeeds is the old base removed and progression/currency committed.
+- Missing templates, missing/duplicate zones, unmappable placed assets, or failed setup reject the swap without charging or changing the saved level. Moved facilities roll back to their original parents and pivots on setup failure. Required forge/station zones must exist even if currently unpurchased. Zone transforms in the templates are never edited.
+- Model pivot inconsistencies must be corrected through Studio AI Assistant by the user; code does not guess corrections.
 - Arbitrary models outside the established `World/Bases/Base_<index>/Zones` and `PlacedAssets` hierarchy are not discovered or moved.
 
 ## Configuration and compatibility
@@ -52,7 +54,7 @@ Purchase/upgrade proximity prompts remain the entry point for facilities. Only t
 4. Backward-compatible profile migration and profile-backed facility state added.
 5. Explicit readiness and saved-tier restoration connected to assignment.
 6. Existing forge/station mechanics retained with deterministic processing.
-7. Logical Base milestones added without physical Base upgrades.
+7. Base milestones now replace the model and migrate facilities into its corresponding authored zones.
 8. Base panel, owner prompt filtering, status improvements, and feedback added.
 9. Cross-module calls and failure paths reviewed locally.
 10. Compilation, Rojo build, and static-analysis results are reported in the implementation handoff. No test suites or Studio sessions are run under the user's no-tests instruction.
@@ -65,11 +67,11 @@ Purchase/upgrade proximity prompts remain the entry point for facilities. Only t
 - Temporarily unavailable templates should leave purchases retryable, upgrade state/resources unchanged, and saved restorations retryable without a second charge.
 - Deposit mixed materials, observe round-robin processing, collect, and check Bag/HUD updates. Rejoin with both intake and output pending and verify restored quantities.
 - Generate station power, consume it with a Home companion, upgrade, and rejoin. Verify capacity, generation, consumption, and saved power.
-- Upgrade Base milestones with and without requirements; confirm player level and physical layout do not change.
+- Upgrade Base milestones with and without requirements; confirm player level is unchanged, the correct Base model replaces the old one, and the same facility instances occupy their new matching zones.
 - Verify old profiles retain inventory and companions while receiving default Base state. Verify leaving/rejoining another plot restores saved tiers at that plot's authored locations.
 - Check desktop/mobile panel sizing, long prompt text, MAX labels, failure toasts, Bag controls, and companion UI.
 
-## Local checks for this implementation
+## Local checks for the initial implementation
 
 - Compilation of the ten changed/new Luau source files: passed.
 - Rojo build: passed (`src/tools/.local/base-implementation.rbxlx`).
@@ -78,3 +80,9 @@ Purchase/upgrade proximity prompts remain the entry point for facilities. Only t
 - No test suites, Play/Run sessions, command-bar snippets, or Studio execution were performed.
 
 Local compilation/static analysis cannot establish live physics, replication, DataStore durability, or multiplayer behavior.
+
+## Physical Base upgrade follow-up
+
+The UI now disables upgrades when the next layout is unavailable and shows the template/zone reason. Existing facility access and upgrade costs are unchanged. Saved Base levels above 1 restore their corresponding model on join rather than the level-1 layout.
+
+User-run checks still needed: upgrade with both active facilities, verify exact new zone alignment and continued charging/processing, rejoin at the upgraded level, and exercise missing-template/missing-zone rejection. No tests or Studio execution were run by the agent.
