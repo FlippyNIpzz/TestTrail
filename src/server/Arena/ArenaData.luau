@@ -45,14 +45,41 @@ local Config: ArenaConfig = {
 		IronOre = { Color = Color3.fromRGB(155, 157, 166), Amount = 1 },
 		CopperOre = { Color = Color3.fromRGB(190, 112, 65), Amount = 1 },
 		GoldOre = { Color = Color3.fromRGB(255, 204, 65), Amount = 1 },
+		-- Molten Surge exclusive ores
+		ObsidianOre = { Color = Color3.fromRGB(55, 35, 75), Amount = 1 },
+		CinderOre = { Color = Color3.fromRGB(240, 105, 30), Amount = 1 },
+		-- Meteor Shower exclusive ores
+		MeteoricOre = { Color = Color3.fromRGB(65, 90, 125), Amount = 1 },
+		AstralShard = { Color = Color3.fromRGB(245, 230, 155), Amount = 1 },
+		-- Titan's Awakening exclusive ores
+		TitanOre = { Color = Color3.fromRGB(50, 150, 160), Amount = 1 },
+		PlatinumOre = { Color = Color3.fromRGB(220, 230, 245), Amount = 1 },
 	},
 	Modes = {
-		{ Name = "Normal", Duration = 180, SpawnInterval = 3, MaxOres = 20,
-			Ores = { "IronOre", "IronOre", "CopperOre" }, Bosses = {} },
-		{ Name = "Rich", Duration = 120, SpawnInterval = 2, MaxOres = 30,
-			Ores = { "IronOre", "CopperOre", "GoldOre" }, Bosses = { "StoneGolem" } },
-		{ Name = "Boss", Duration = 90, SpawnInterval = 4, MaxOres = 15,
-			Ores = { "CopperOre", "GoldOre" }, Bosses = { "IronGolem" } },
+		{
+			Name = "MoltenSurge",
+			Duration = 120,
+			SpawnInterval = 2.5,
+			MaxOres = 25,
+			Ores = { "CopperOre", "ObsidianOre", "ObsidianOre", "CinderOre" },
+			Bosses = {},
+		},
+		{
+			Name = "MeteorShower",
+			Duration = 120,
+			SpawnInterval = 3,
+			MaxOres = 25,
+			Ores = { "IronOre", "MeteoricOre", "MeteoricOre", "AstralShard" },
+			Bosses = {},
+		},
+		{
+			Name = "TitanAwakening",
+			Duration = 120,
+			SpawnInterval = 3.5,
+			MaxOres = 20,
+			Ores = { "GoldOre", "TitanOre", "PlatinumOre" },
+			Bosses = { "StoneGolem" },
+		},
 	},
 }
 

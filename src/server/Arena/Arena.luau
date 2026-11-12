@@ -8,12 +8,23 @@ local BaseManager = require(script.Parent.Parent.Base.BaseManager)
 local Data = require(script.Parent.Parent.PlayerData.PlayerDataModule)
 local Inventory = require(script.Parent.Parent.PlayerData.Inventory)
 local World = require(script.Parent.Parent.Companion.CompanionWorld)
+local MoltenSurge = require(script.Parent.Modes.MoltenSurge)
+local MeteorShower = require(script.Parent.Modes.MeteorShower)
+local TitanAwakening = require(script.Parent.Modes.TitanAwakening)
+local ModeTypes = require(script.Parent.Modes.ModeTypes)
+
 local Arena = {}
 local random = Random.new()
 local runtime: Folder? = nil
 local ores: Folder? = nil
 local drops: Folder? = nil
 local bosses: Folder? = nil
+local hazards: Folder? = nil
+local activeHandler: any = nil
+local modeHandlers: { [string]: any } = {}
+if MoltenSurge then modeHandlers["MoltenSurge"] = MoltenSurge end
+if MeteorShower then modeHandlers["MeteorShower"] = MeteorShower end
+if TitanAwakening then modeHandlers["TitanAwakening"] = TitanAwakening end
 local connection: RBXScriptConnection? = nil
 local leaving: RBXScriptConnection? = nil
 local modeIndex = 0
@@ -92,25 +103,40 @@ local function spawnFrame(bounds: BasePart, height: number): CFrame
 	return CFrame.new(World.RandomArenaSurface(bounds, random, Config.SpawnInset, height))
 end
 
+function Arena.RegisterOre(ore: BasePart, id: string)
+	registered[ore] = id
+	ore.Destroying:Connect(function() registered[ore] = nil end)
+end
+
+function Arena.SpawnOreAt(bounds: BasePart, id: string, position: Vector3): BasePart?
+	local folder = ores
+	if not folder then return nil end
+	local definition = Config.Ores[id]
+	if not definition then return nil end
+	local ore = Instance.new("Part")
+	ore.Name = id
+	ore.Shape = Enum.PartType.Ball
+	ore.Size = Vector3.new(3, 3, 3)
+	ore.Color = definition.Color
+	ore.Material = Enum.Material.Slate
+	ore.Anchored = true
+	ore.CanCollide, ore.CanTouch, ore.CanQuery = false, false, false
+	local clamped = World.ArenaSurface(bounds, position, 0, 1.5)
+	ore.CFrame = CFrame.new(clamped)
+	ore:SetAttribute("OreType", id)
+	Arena.RegisterOre(ore, id)
+	ore.Parent = folder
+	return ore
+end
+
 local function spawnOre(bounds: BasePart)
 	local folder = ores
 	if not folder then return end
 	local mode = Config.Modes[modeIndex]
 	if #folder:GetChildren() >= mode.MaxOres then return end
 	local id = mode.Ores[random:NextInteger(1, #mode.Ores)]
-	local ore = Instance.new("Part")
-	ore.Name = id
-	ore.Shape = Enum.PartType.Ball
-	ore.Size = Vector3.new(3, 3, 3)
-	ore.Color = Config.Ores[id].Color
-	ore.Material = Enum.Material.Slate
-	ore.Anchored = true
-	ore.CanCollide, ore.CanTouch, ore.CanQuery = false, false, false
-	ore.CFrame = spawnFrame(bounds, 1.5)
-	ore:SetAttribute("OreType", id)
-	registered[ore] = id
-	ore.Destroying:Connect(function() registered[ore] = nil end)
-	ore.Parent = folder
+	local position = World.RandomArenaSurface(bounds, random, Config.SpawnInset, 1.5)
+	Arena.SpawnOreAt(bounds, id, position)
 end
 
 -- One bundle per ore type preserves quantities without spawning hundreds of parts.
@@ -156,6 +182,11 @@ local function startMode(index: number, now: number, bounds: BasePart)
 	nextSpawn = now
 	if ores then ores:ClearAllChildren() end
 	if bosses then bosses:ClearAllChildren() end
+	if hazards then hazards:ClearAllChildren() end
+
+	if activeHandler and activeHandler.Stop then activeHandler.Stop() end
+	activeHandler = modeHandlers[mode.Name]
+
 	local state = runtime
 	if state then
 		state:SetAttribute("Mode", mode.Name)
@@ -176,13 +207,29 @@ local function startMode(index: number, now: number, bounds: BasePart)
 			warn(("[Arena] Missing boss Model ServerStorage.ArenaBosses.%s; skipping boss."):format(name))
 		end
 	end
+
+	if activeHandler and activeHandler.Start and runtime and ores and drops and bosses and hazards then
+		local context: ModeTypes.ModeContext = {
+			Bounds = bounds,
+			RuntimeFolder = runtime,
+			HazardsFolder = hazards,
+			OresFolder = ores,
+			DropsFolder = drops,
+			BossesFolder = bosses,
+			RegisterOre = Arena.RegisterOre,
+			SpawnOreAt = Arena.SpawnOreAt,
+		}
+		activeHandler.Start(context)
+	end
 end
 
 function Arena.Stop()
 	if connection then connection:Disconnect(); connection = nil end
 	if leaving then leaving:Disconnect(); leaving = nil end
+	if activeHandler and activeHandler.Stop then activeHandler.Stop() end
+	activeHandler = nil
 	if runtime then runtime:Destroy() end
-	runtime, ores, bosses, drops = nil, nil, nil, nil
+	runtime, ores, bosses, drops, hazards = nil, nil, nil, nil, nil
 	table.clear(dropInfo)
 	modeIndex = 0
 	endsAt = 0
@@ -214,20 +261,28 @@ function Arena.Init()
 	bossesFolder.Parent = folder
 	bosses = bossesFolder
 
+	local hazardsFolder = Instance.new("Folder")
+	hazardsFolder.Name = "Hazards"
+	hazardsFolder.Parent = folder
+	hazards = hazardsFolder
+
 	folder:SetAttribute("Mode", "WaitingForArena")
 	leaving = Players.PlayerRemoving:Connect(function(player) lastCollection[player] = nil end)
-	connection = RunService.Heartbeat:Connect(function()
+	connection = RunService.Heartbeat:Connect(function(dt: number)
 		for ore, info in pairs(dropInfo) do
 			if workspace:GetServerTimeNow() >= info.ExpiresAt then ore:Destroy() end
 		end
 		local bounds = World.Arena()
 		if not bounds then
 			if modeIndex ~= 0 then
+				if activeHandler and activeHandler.Stop then activeHandler.Stop() end
+				activeHandler = nil
 				if drops then drops:ClearAllChildren() end
 				table.clear(dropInfo)
 				table.clear(registered)
 				if ores then ores:ClearAllChildren() end
 				if bosses then bosses:ClearAllChildren() end
+				if hazards then hazards:ClearAllChildren() end
 				modeIndex = 0
 				endsAt = 0
 				nextSpawn = 0
@@ -247,6 +302,9 @@ function Arena.Init()
 		if now >= nextPickup then
 			nextPickup = now + Config.PickupScanInterval
 			Arena.CollectNearbyOre()
+		end
+		if activeHandler and activeHandler.Step then
+			activeHandler.Step(now, dt)
 		end
 	end)
 end
