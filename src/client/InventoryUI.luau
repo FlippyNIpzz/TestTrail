@@ -7,26 +7,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Theme = require(script.Parent:WaitForChild("UITheme"))
+local Modal = require(script.Parent.ModalController)
 local CompanionUI = require(script.Parent.Companion.CompanionUI)
 
-local function getRemotesModule(): ModuleScript
-	local shared = ReplicatedStorage:WaitForChild("Shared", 10)
-	local remotesItem = shared and (shared:FindFirstChild("Remotes") or shared:WaitForChild("Remotes", 5))
-	if remotesItem then
-		if remotesItem:IsA("ModuleScript") then
-			return remotesItem
-		elseif remotesItem:IsA("Folder") then
-			local child = remotesItem:FindFirstChild("Remotes") or remotesItem:WaitForChild("Remotes", 3)
-			if child and child:IsA("ModuleScript") then
-				return child
-			end
-		end
-		return remotesItem :: any
-	end
-	error("[InventoryUI]: Could not locate Remotes module under ReplicatedStorage.Shared")
-end
-
-local Remotes = require(getRemotesModule())
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
 
 local C = Theme.Colors
 local make = Theme.Make
@@ -46,6 +30,12 @@ local emptyNotice: TextLabel? = nil
 
 local currentInventory: { [string]: number } = {}
 local isOpen = false
+local loaded = false
+local loading = false
+local loadFailed = false
+local revision = 0
+local retryButton: TextButton? = nil
+local closePanel: () -> ()
 
 -- ITEM DEFINITION METADATA
 
@@ -100,14 +90,14 @@ local function updateLauncherBadge()
 	for _, count in pairs(currentInventory) do
 		totalItems += count
 	end
-	launcherButton.Text = ("🎒 BAG (%d) [B]"):format(totalItems)
+	launcherButton.Text = if loaded then ("BAG (%d) [B]"):format(totalItems) else "BAG [B]"
 end
 
 local function renderItems()
 	if not itemsList or not statusLabel or not emptyNotice then return end
 
 	for _, child in ipairs(itemsList:GetChildren()) do
-		if child:IsA("GuiObject") and child.Name ~= "UIListLayout" and child.Name ~= "UIPadding" and child ~= emptyNotice then
+		if child:IsA("GuiObject") and child.Name ~= "UIListLayout" and child.Name ~= "UIPadding" and child ~= emptyNotice and child ~= retryButton then
 			child:Destroy()
 		end
 	end
@@ -117,7 +107,16 @@ local function renderItems()
 	local totalCount = 0
 	local hasAnyItem = false
 
+	local ids = {}
 	for itemId, count in pairs(currentInventory) do
+		if count > 0 then table.insert(ids, itemId) end
+	end
+	table.sort(ids, function(a, b)
+		local left, right = getItemMeta(a).DisplayName, getItemMeta(b).DisplayName
+		return if left == right then a < b else left < right
+	end)
+	for order, itemId in ipairs(ids) do
+		local count = currentInventory[itemId]
 		if count > 0 then
 			hasAnyItem = true
 			totalCount += count
@@ -130,8 +129,8 @@ local function renderItems()
 			end
 
 			local card = Theme.Panel(itemsList, {
-				Name = "ItemCard_" .. itemId,
-				Size = UDim2.new(1, -8, 0, 56), BackgroundColor3 = C.Panel,
+				Name = "ItemCard_" .. itemId, LayoutOrder = order,
+				Size = UDim2.new(1, -8, 0, 100), BackgroundColor3 = C.Panel,
 			})
 
 			local badge = Theme.Panel(card, {
@@ -147,24 +146,24 @@ local function renderItems()
 
 			make("TextLabel", card, {
 				Name = "Title", Position = UDim2.fromOffset(66, 8),
-				Size = UDim2.new(1, -140, 0, 20), BackgroundTransparency = 1,
+				Size = UDim2.new(1, -140, 0, 42), BackgroundTransparency = 1,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				Text = meta.DisplayName,
-				TextColor3 = C.Ink, TextSize = 17,
+				TextColor3 = C.Ink, TextSize = 14, TextWrapped = true,
 			})
 
 			make("TextLabel", card, {
-				Name = "Description", Position = UDim2.fromOffset(66, 30),
-				Size = UDim2.new(1, -140, 0, 16), BackgroundTransparency = 1,
+				Name = "Description", Position = UDim2.fromOffset(10, 58),
+				Size = UDim2.new(1, -20, 0, 34), BackgroundTransparency = 1,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				Text = meta.Description,
 				TextColor3 = C.Muted, TextSize = 12,
-				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextWrapped = true,
 			})
 
 			local pill = Theme.Panel(card, {
 				Name = "Pill", AnchorPoint = Vector2.new(1, 0.5),
-				Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.fromOffset(56, 32),
+				Position = UDim2.new(1, -12, 0, 28), Size = UDim2.fromOffset(56, 32),
 				BackgroundColor3 = C.Navy,
 			})
 			make("TextLabel", pill, {
@@ -176,11 +175,18 @@ local function renderItems()
 	end
 
 	emptyNotice.Visible = not hasAnyItem
-	statusLabel.Text = ("Ores: %d  |  Refined: %d  |  Total Items: %d"):format(totalOres, totalRefined, totalCount)
+	emptyNotice.Text = if loading then "LOADING RESOURCES…"
+		elseif loadFailed then "Could not load your resources.\n\nUse Retry below."
+		elseif not loaded then "Waiting for player data…"
+		else "YOUR BAG IS EMPTY\n\nWalk near ore nodes to gather resources, then near your Forge to smelt them!"
+	if retryButton then retryButton.Visible = loadFailed and not loading end
+	statusLabel.Text = if loaded then ("ORE %d  |  BARS %d  |  TOTAL %d"):format(totalOres, totalRefined, totalCount) else "Resources not loaded"
 	updateLauncherBadge()
 end
 
 local function setOpen(open: boolean)
+	if open then Modal.Open(closePanel) else Modal.Release(closePanel) end
+	if screenGui then screenGui.DisplayOrder = if open then 10 else 5 end
 	isOpen = open
 	if inventoryPanel then
 		inventoryPanel.Visible = open
@@ -193,48 +199,76 @@ local function setOpen(open: boolean)
 	end
 end
 
+closePanel = function() setOpen(false) end
+
+local function loadInventory()
+	if loading then return end
+	if player:GetAttribute("DataReady") ~= true then renderItems(); return end
+	loading = true
+	loadFailed = false
+	local startedRevision = revision
+	renderItems()
+	task.spawn(function()
+		local success, initial = pcall(function() return Remotes.GetInventory:InvokeServer() end)
+		loading = false
+		-- A live update received during the request is newer than its snapshot.
+		if revision == startedRevision then
+			if success and type(initial) == "table" and player:GetAttribute("DataReady") == true then
+				currentInventory = initial
+				loaded = true
+			else loadFailed = true end
+		end
+		renderItems()
+	end)
+end
+
 -- INITIALIZATION
 
 function InventoryUI.Init()
 	if screenGui then return end
 
-	screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "InventoryHUD"
-	screenGui.ResetOnSpawn = false
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	screenGui.Parent = playerGui
+	local screen = Instance.new("ScreenGui")
+	screenGui = screen
+	screen.Name = "InventoryHUD"
+	screen.ResetOnSpawn = false
+	screen.DisplayOrder = 5
+	screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screen.Parent = playerGui
 
-	launcherButton = Theme.Button(screenGui, {
+	local launcher: TextButton = Theme.Button(screenGui, {
 		Name = "InventoryLauncher", Position = UDim2.new(0, 18, 1, -74),
 		Size = UDim2.fromOffset(150, 48), BackgroundColor3 = C.Navy,
 		TextColor3 = C.Cream, Text = "🎒 BAG (0) [B]",
 		TextSize = 16,
 	})
+	launcherButton = launcher
 
-	launcherButton.Activated:Connect(function()
+	launcher.Activated:Connect(function()
 		setOpen(not isOpen)
 	end)
 
-	backdrop = make("TextButton", screenGui, {
+	local shade: TextButton = make("TextButton", screenGui, {
 		Name = "Backdrop", Size = UDim2.fromScale(1, 1),
 		BackgroundColor3 = C.Ink, BackgroundTransparency = 0.45,
 		Text = "", AutoButtonColor = false,
 		Visible = false, ZIndex = 2,
 	})
+	backdrop = shade
 
-	backdrop.Activated:Connect(function()
+	shade.Activated:Connect(function()
 		setOpen(false)
 	end)
 
-	inventoryPanel = Theme.Panel(screenGui, {
+	local panel: Frame = Theme.Panel(screenGui, {
 		Name = "InventoryModal", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.88, 0.76),
 		BackgroundColor3 = C.Panel, Visible = false,
 		ZIndex = 3,
 	})
+	inventoryPanel = panel
 
 	make("UISizeConstraint", inventoryPanel, {
-		MaxSize = Vector2.new(620, 520), MinSize = Vector2.new(320, 360),
+		MaxSize = Vector2.new(620, 560),
 	})
 
 	local titlePlate = Theme.Panel(inventoryPanel, {
@@ -245,8 +279,8 @@ function InventoryUI.Init()
 	make("TextLabel", titlePlate, {
 		Position = UDim2.fromOffset(14, 4), Size = UDim2.new(1, -28, 1, -8),
 		BackgroundTransparency = 1, TextColor3 = C.Cream,
-		TextSize = 20, TextXAlignment = Enum.TextXAlignment.Left,
-		Text = "🎒 BACKPACK INVENTORY",
+		TextSize = 16, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
+		Text = "BACKPACK",
 	})
 
 	local closeBtn = Theme.Button(inventoryPanel, {
@@ -261,24 +295,24 @@ function InventoryUI.Init()
 	end)
 
 	local statusBar = Theme.Panel(inventoryPanel, {
-		Name = "StatusBar", Position = UDim2.fromOffset(16, 48),
+		Name = "StatusBar", Position = UDim2.fromOffset(16, 90),
 		Size = UDim2.new(1, -32, 0, 36), BackgroundColor3 = C.Well,
 	})
 
 	statusLabel = make("TextLabel", statusBar, {
 		Name = "StatusText", Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1, Text = "Ores: 0  |  Refined: 0  |  Total Items: 0",
-		TextColor3 = C.Ink, TextSize = 14,
+		TextColor3 = C.Ink, TextSize = 12, TextWrapped = true,
 	})
 
-	itemsList = make("ScrollingFrame", inventoryPanel, {
-		Name = "ItemsScroll", Position = UDim2.fromOffset(16, 94),
-		Size = UDim2.new(1, -32, 1, -108), BackgroundColor3 = C.Well,
+	local scroll: ScrollingFrame = make("ScrollingFrame", inventoryPanel, {
+		Name = "ItemsScroll", Position = UDim2.fromOffset(16, 134),
+		Size = UDim2.new(1, -32, 1, -148), BackgroundColor3 = C.Well,
 		BorderSizePixel = 0, ScrollBarThickness = 8,
 		ScrollBarImageColor3 = C.Shade, AutomaticCanvasSize = Enum.AutomaticSize.Y,
 		CanvasSize = UDim2.new(),
 	})
-	Theme.Edge(itemsList)
+	itemsList = scroll
 
 	make("UIListLayout", itemsList, {
 		Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder,
@@ -298,53 +332,58 @@ function InventoryUI.Init()
 	})
 
 	-- Both categories share the existing Bag styling and launcher.
+	if not inventoryPanel then return end
 	local companionTab = CompanionUI.Mount(inventoryPanel)
-	statusBar.Visible = false
+	retryButton = Theme.Button(itemsList, {
+		Name = "RetryResources", Size = UDim2.new(1, -16, 0, 44), Text = "RETRY",
+		BackgroundColor3 = C.Navy, TextColor3 = C.Cream, Visible = false,
+	})
+	assert(retryButton)
+	retryButton.Activated:Connect(loadInventory)
 	local resourcesTabButton = Theme.Button(inventoryPanel, {
 		Name = "ResourcesTabButton", Position = UDim2.fromOffset(16, 48),
-		Size = UDim2.new(0.5, -20, 0, 36), Text = "RESOURCES", TextSize = 14,
+		Size = UDim2.new(0.5, -20, 0, 36), Text = "RESOURCES", TextSize = 12, TextWrapped = true,
 		BackgroundColor3 = C.Navy, TextColor3 = C.Cream,
 	})
 	local companionsTabButton = Theme.Button(inventoryPanel, {
 		Name = "CompanionsTabButton", Position = UDim2.new(0.5, 4, 0, 48),
-		Size = UDim2.new(0.5, -20, 0, 36), Text = "COMPANIONS", TextSize = 14,
+		Size = UDim2.new(0.5, -20, 0, 36), Text = "COMPANIONS", TextSize = 12, TextWrapped = true,
 		BackgroundColor3 = C.Navy, TextColor3 = C.Cream,
 	})
-	resourcesTabButton.Activated:Connect(function()
-		companionTab.Visible = false
-		if itemsList then itemsList.Visible = true end
-	end)
-	companionsTabButton.Activated:Connect(function()
-		companionTab.Visible = true
-		if itemsList then itemsList.Visible = false end
-	end)
+	local function selectTab(companions: boolean)
+		companionTab.Visible = companions
+		statusBar.Visible = not companions
+		if itemsList then itemsList.Visible = not companions end
+		resourcesTabButton.BackgroundColor3 = if companions then C.Navy else C.Green
+		companionsTabButton.BackgroundColor3 = if companions then C.Green else C.Navy
+		resourcesTabButton.Text = if companions then "RESOURCES" else "[RESOURCES]"
+		companionsTabButton.Text = if companions then "[COMPANIONS]" else "COMPANIONS"
+	end
+	resourcesTabButton.Activated:Connect(function() selectTab(false) end)
+	companionsTabButton.Activated:Connect(function() selectTab(true) end)
+	selectTab(false)
 
 	-- Keyboard Shortcut (B or I)
 	UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
-		if gameProcessed then return end
+		if gameProcessed or UserInputService:GetFocusedTextBox() then return end
 		if input.KeyCode == Enum.KeyCode.B or input.KeyCode == Enum.KeyCode.I then
 			setOpen(not isOpen)
-		elseif input.KeyCode == Enum.KeyCode.Escape and isOpen then
-			setOpen(false)
 		end
 	end)
 
 	-- Real-time Replicated Events from Server
 	Remotes.InventoryUpdated.OnClientEvent:Connect(function(newInventory: { [string]: number })
+		revision += 1
+		loaded = true
+		loadFailed = false
 		currentInventory = newInventory or {}
 		renderItems()
 	end)
 
-	-- Initial Data Sync
-	task.spawn(function()
-		local success, initial = pcall(function()
-			return Remotes.GetInventory:InvokeServer()
-		end)
-		if success and type(initial) == "table" then
-			currentInventory = initial
-			renderItems()
-		end
+	player:GetAttributeChangedSignal("DataReady"):Connect(function()
+		if player:GetAttribute("DataReady") == true and not loaded then loadInventory() end
 	end)
+	loadInventory()
 end
 
 return InventoryUI

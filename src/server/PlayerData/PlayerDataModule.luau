@@ -16,7 +16,7 @@ PlayerDataModule.__index = PlayerDataModule
 type PlayerDataSchema = PlayerData.PlayerDataSchema
 
 local sessions: { [Player]: PlayerDataSchema } = {}
-local playerStore = DataStoreService:GetDataStore(PlayerData.DATASTORE_NAME)
+local playerStore = if PlayerData.PERSISTENCE_ENABLED then DataStoreService:GetDataStore(PlayerData.DATASTORE_NAME) else nil
 
 function PlayerDataModule.InitializeProfile(player: Player): (PlayerDataSchema?, string?)
 	if sessions[player] then return sessions[player], nil end
@@ -24,7 +24,10 @@ function PlayerDataModule.InitializeProfile(player: Player): (PlayerDataSchema?,
 	local key = "Player_" .. userId
 	
 	local success, result = pcall(function()
-		return playerStore:GetAsync(key)
+		if playerStore then
+			return playerStore:GetAsync(key)
+		end
+		return nil
 	end)
 	
 	if not success then
@@ -72,6 +75,7 @@ function PlayerDataModule.InitializeProfile(player: Player): (PlayerDataSchema?,
 end
 
 function PlayerDataModule.SaveProfile(player: Player)
+	if not playerStore then return end
 	local data = sessions[player]
 	if not data then return end
 	

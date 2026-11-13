@@ -20,6 +20,17 @@ Config.StationTransferRate = 13
 Config.HomeWanderRadius = 5
 Config.FollowOffset = Vector3.new(4, 0, 4)
 Config.FollowTeleportDistance = 80
+-- Stud-based traversal limits; dimensions are measured independently for each rig.
+Config.StepHeight = 0.65
+Config.JumpHeight = 3.5
+Config.JumpLookAhead = 0.3
+Config.PathJumpRequestLifetime = 0.75
+Config.MaxDrop = 6
+Config.MaxSlopeDegrees = 42
+Config.Gravity = 60
+Config.PathRetryInterval = 1.5
+Config.PathTargetTolerance = 5
+Config.MaxTravelPerSubstep = 0.5
 Config.Modes = { Home = true, Follow = true, Fight = true }
 export type Companion = {
 	Id: string, TemplateId: string, Element: string, Rarity: string,

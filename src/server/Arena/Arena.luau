@@ -108,6 +108,20 @@ function Arena.RegisterOre(ore: BasePart, id: string)
 	ore.Destroying:Connect(function() registered[ore] = nil end)
 end
 
+local function resourceTemplate(id: string): Model?
+	local scene = workspace:FindFirstChild("Game")
+	local arena = scene and scene:FindFirstChild("Arena")
+	local authored = arena and arena:FindFirstChild("Resource_Models")
+	local stored = ServerStorage:FindFirstChild("ResourceModels")
+	-- Keep sparse locations from masking a matching storage template.
+	for _, folder in { authored, stored } do
+		local candidate = folder and folder:FindFirstChild(id)
+		if candidate and candidate:IsA("Model") and candidate.Archivable
+			and candidate:FindFirstChildWhichIsA("BasePart", true) then return candidate end
+	end
+	return nil
+end
+
 function Arena.SpawnOreAt(bounds: BasePart, id: string, position: Vector3): BasePart?
 	local folder = ores
 	if not folder then return nil end
@@ -123,6 +137,25 @@ function Arena.SpawnOreAt(bounds: BasePart, id: string, position: Vector3): Base
 	ore.CanCollide, ore.CanTouch, ore.CanQuery = false, false, false
 	local clamped = World.ArenaSurface(bounds, position, 0, 1.5)
 	ore.CFrame = CFrame.new(clamped)
+	local template = resourceTemplate(id)
+	if template then
+		local model = template:Clone()
+		local box, size = model:GetBoundingBox()
+		local pivot = model:GetPivot()
+		local surface = World.ArenaSurface(bounds, position, math.max(size.X, size.Z) / 2, 0)
+		local bottom = Vector3.new(box.Position.X, box.Position.Y - size.Y / 2, box.Position.Z)
+		model:PivotTo(pivot + (surface - bottom))
+		for _, part in model:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.Anchored = true
+				part.CanCollide, part.CanTouch, part.CanQuery = false, false, false
+			end
+		end
+		-- The invisible pickup root preserves the BasePart API and owns all visual cleanup.
+		ore.Transparency = 1
+		ore.CFrame = CFrame.new(surface + Vector3.new(0, 1.5, 0))
+		model.Parent = ore
+	end
 	ore:SetAttribute("OreType", id)
 	Arena.RegisterOre(ore, id)
 	ore.Parent = folder

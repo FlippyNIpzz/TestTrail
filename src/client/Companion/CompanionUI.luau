@@ -76,14 +76,15 @@ render = function()
 		label(list, current.TemplateId .. "  •  " .. current.Rarity .. "  •  " .. current.Element, 36)
 		local progressLabel = label(list, "", 66)
 		local valuesLabel = label(list, "", 60)
-		updateDetails = function()
+		local refreshDetails = function()
 			local latest = find(selected)
 			if not latest then return end
 			progressLabel.Text = ("Level %d  |  XP %.1f / %d\nStat points: %s"):format(latest.Level, latest.XP, state.XPPerLevel, statText(latest))
 			valuesLabel.Text = ("Health %.1f / %.1f   |   Stamina %.1f / %.1f\nDamage %.1f   |   Movement speed %.1f"):format(
 				latest.Health, latest.Values.Health, latest.Charge, latest.Values.Charge, latest.Values.Damage, latest.Values.Speed)
 		end
-		updateDetails()
+		updateDetails = refreshDetails
+		refreshDetails()
 		local isEquipped = state.EquippedId == current.Id
 		if fusing and isEquipped then
 			label(list, "KEEP: " .. current.TemplateId .. "\nChoose a same-rarity companion below to consume.", 52)

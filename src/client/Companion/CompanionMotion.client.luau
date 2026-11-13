@@ -1,592 +1,264 @@
 --!strict
--- Cosmetic copies interpolate server movement and provide rich procedural human-like animations.
--- Drives walking arm/shoulder swing, jumping, idle breathing, and organic head glancing.
+-- Smoothed visual copies; authoritative traversal stays on the server.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-
-type JointData = {
-	Motor: Motor6D,
-	BaseC0: CFrame,
-	BaseC1: CFrame,
-}
-
-type FootData = {
-	Target: Attachment,
-	BaseTargetCF: CFrame,
-	IK: IKControl,
-	SoleOffset: number,
-}
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Math = require(ReplicatedStorage.Shared.CompanionMotionMath)
+local Rig = require(script.Parent.CompanionRig)
 
 type Motion = {
-	Source: Model,
-	Visual: Model,
-	Hidden: { [BasePart]: number },
-	Frame: CFrame,
-	LastTarget: Vector3,
-	Speed: number,
-	Phase: number,
-	Weight: number,
-	PreviousY: number,
-	VerticalSpeed: number,
-	IsAirborne: boolean,
-	AirWeight: number,
-	LandingSquash: number,
-	LastYaw: number,
-	TurnYawRate: number,
-	HeadYaw: number,
-	HeadPitch: number,
-	TargetHeadYaw: number,
-	TargetHeadPitch: number,
-	NextGlanceTime: number,
-	Joints: { [string]: JointData },
-	Feet: { FootData },
-	RayParams: RaycastParams,
-	OwnerUserId: number?,
+	Visual: Model, Hidden: {[BasePart]: number}, Frame: CFrame, LastTarget: Vector3,
+	Speed: number, Phase: number, Weight: number, AirWeight: number, Grounded: boolean,
+	VerticalSpeed: number, Landing: number, Yaw: number, Turn: number,
+	HeadYaw: number, HeadPitch: number, LookYaw: number, LookPitch: number, NextGlance: number,
+	Joints: {[string]: Rig.Joint}, Feet: {Rig.Foot}, Params: RaycastParams,
+	TeleportId: number, Pelvis: number, Dirty: boolean, Connections: {RBXScriptConnection},
 }
-
-local motions: { [Model]: Motion } = {}
+local motions: {[Model]: Motion} = {}
 local visuals = Instance.new("Folder")
 visuals.Name = "CompanionVisuals"
 visuals.Parent = workspace
-
-local function getJoint(joints: { [string]: JointData }, ...: string): JointData?
-	for i = 1, select("#", ...) do
-		local name = select(i, ...)
-		local found = joints[name]
-		if found then return found end
-	end
-	return nil
+local function number(model: Model, name: string, fallback: number): number
+	local value = model:GetAttribute(name)
+	return if type(value) == "number" then value else fallback
 end
-
-local function poseJoint(joint: JointData?, offset: CFrame)
-	if joint then
-		joint.Motor.C0 = joint.BaseC0 * offset
+local function reset(motion: Motion, frame: CFrame)
+	motion.Frame = frame; motion.LastTarget = frame.Position
+	motion.Speed = 0; motion.Phase = 0; motion.Weight = 0; motion.AirWeight = 0
+	motion.VerticalSpeed = 0; motion.Landing = 0; motion.Grounded = true
+	local _, yaw = frame:ToEulerAnglesYXZ()
+	motion.Yaw = yaw; motion.Turn = 0; motion.Pelvis = 0
+	motion.HeadYaw = 0; motion.HeadPitch = 0; motion.LookYaw = 0; motion.LookPitch = 0
+	motion.NextGlance = os.clock() + 1
+	for _, joint in motion.Joints do joint.Motor.C0 = joint.BaseC0 end
+	for _, foot in motion.Feet do
+		foot.Plant = nil; foot.Support = nil; foot.SupportLocal = nil; foot.WasStance = false
+		foot.Correction = 0; foot.IK.Weight = 0; foot.IK.Enabled = false
+		foot.Target.CFrame = foot.BaseTargetCF
 	end
 end
-
-local function makeMotor(name: string, p0: BasePart, p1: BasePart, world: CFrame): Motor6D
-	local motor = Instance.new("Motor6D")
-	motor.Name = name
-	motor.Part0 = p0
-	motor.Part1 = p1
-	motor.C0 = p0.CFrame:ToObjectSpace(world)
-	motor.C1 = p1.CFrame:ToObjectSpace(world)
-	motor.Parent = p0
-	return motor
-end
-
--- Rigs or validates joints on the visual clone so Motor6D procedural poses animate limbs cleanly.
-local function setupVisualRig(visual: Model): ({ [string]: JointData }, { FootData })
-	local root = visual:FindFirstChild("CompanionRoot") :: BasePart?
-	local torso = visual:FindFirstChild("Torso") :: BasePart?
-	if not torso and visual.PrimaryPart and visual.PrimaryPart.Name ~= "CompanionRoot" then
-		torso = visual.PrimaryPart
-	end
-	if not torso then
-		for _, item in visual:GetChildren() do
-			if item:IsA("BasePart") and item.Name ~= "CompanionRoot" then
-				torso = item
-				break
-			end
-		end
-	end
-
-	local torsoPart = torso
-	if torsoPart then
-		local frame = torsoPart.CFrame
-		if not root then
-			local newRoot = Instance.new("Part")
-			newRoot.Name = "CompanionRoot"
-			newRoot.Size = Vector3.new(0.5, 0.5, 0.5)
-			newRoot.CFrame = frame
-			newRoot.Transparency = 1
-			newRoot.CanCollide = false
-			newRoot.CanTouch = false
-			newRoot.CanQuery = false
-			newRoot.Massless = true
-			newRoot.Parent = visual
-			root = newRoot
-		end
-		visual.PrimaryPart = root
-
-		-- Check if joints already exist
-		local existingJoints: { [string]: Motor6D } = {}
-		for _, item in visual:GetDescendants() do
-			if item:IsA("Motor6D") then
-				existingJoints[item.Name] = item
-			end
-		end
-
-		if not existingJoints["Body"] and root then
-			makeMotor("Body", root, torsoPart, frame)
-		end
-
-		local head = visual:FindFirstChild("Head") :: BasePart?
-		if head and not existingJoints["HeadTurn"] and not existingJoints["Neck"] then
-			makeMotor("HeadTurn", torsoPart, head, frame * CFrame.new(0, 1, 0))
-		end
-
-		-- Auto-identify side limbs if not already motored
-		local originalParts: { BasePart } = {}
-		for _, item in visual:GetDescendants() do
-			if item:IsA("BasePart") and item ~= root then
-				table.insert(originalParts, item)
-			end
-		end
-
-		local function findSidePart(names: { string }, sign: number): BasePart?
-			for _, p in originalParts do
-				for _, name in names do
-					if p.Name == name and frame:PointToObjectSpace(p.Position).X * sign > 0 then
-						return p
-					end
-				end
-			end
-			return nil
-		end
-
-		local sides = {
-			{ Label = "Left", Sign = -1 },
-			{ Label = "Right", Sign = 1 },
-		}
-
-		for _, side in sides do
-			local label, sign = side.Label, side.Sign
-			local upper = findSidePart({ label .. "UpperArm", label .. "Shoulder", "Shoulder" }, sign)
-			local lower = findSidePart({ label .. "LowerArm", label .. "Forearm", "Forearm" }, sign)
-			local hand = findSidePart({ label .. "Hand", label .. "Fist", "Fist" }, sign)
-			local thigh = findSidePart({ label .. "UpperLeg", label .. "Thigh", "Thigh" }, sign)
-			local shin = findSidePart({ label .. "LowerLeg", label .. "Ankle", "Ankle" }, sign)
-			local foot = findSidePart({ label .. "Foot", "Foot" }, sign)
-
-			if upper and not existingJoints[label .. "Shoulder"] then
-				makeMotor(label .. "Shoulder", torsoPart, upper, frame * CFrame.new(sign * 0.88, 0.85, 0))
-			end
-			if upper and lower and not existingJoints[label .. "Elbow"] then
-				makeMotor(label .. "Elbow", upper, lower, frame * CFrame.new(sign * 1.62, -0.2, 0))
-			end
-			if lower and hand and not existingJoints[label .. "Wrist"] then
-				makeMotor(label .. "Wrist", lower, hand, frame * CFrame.new(sign * 1.8, -0.96, -0.05))
-			end
-			if thigh and not existingJoints[label .. "Hip"] then
-				makeMotor(label .. "Hip", torsoPart, thigh, frame * CFrame.new(sign * 0.52, -1.15, 0.05))
-			end
-			if thigh and shin and not existingJoints[label .. "Knee"] then
-				makeMotor(label .. "Knee", thigh, shin, frame * CFrame.new(sign * 0.55, -1.82, 0))
-			end
-			if shin and foot and not existingJoints[label .. "Ankle"] then
-				makeMotor(label .. "Ankle", shin, foot, frame * CFrame.new(sign * 0.6, -2.22, -0.1))
-			end
-		end
-
-		-- Weld accessory/decorative parts to torso if unattached
-		for _, p in originalParts do
-			if p ~= torsoPart and not p:FindFirstChildOfClass("Motor6D") and not p:FindFirstChildOfClass("WeldConstraint") then
-				local isPart1OfMotor = false
-				for _, m in visual:GetDescendants() do
-					if m:IsA("Motor6D") and m.Part1 == p then
-						isPart1OfMotor = true
-						break
-					end
-				end
-				if not isPart1OfMotor then
-					local weld = Instance.new("WeldConstraint")
-					weld.Part0 = torsoPart
-					weld.Part1 = p
-					weld.Parent = p
-				end
-			end
-		end
-	end
-
-	-- Configure physics state: Root anchored, limbs unanchored
-	for _, item in visual:GetDescendants() do
-		if item:IsA("BasePart") then
-			if root and item == root then
-				item.Anchored = true
-			else
-				item.Anchored = false
-			end
-			item.CanCollide = false
-			item.CanTouch = false
-			item.CanQuery = false
-			item.Massless = true
-		end
-	end
-
-	-- Collect all active joints
-	local joints: { [string]: JointData } = {}
-	for _, item in visual:GetDescendants() do
-		if item:IsA("Motor6D") then
-			joints[item.Name] = {
-				Motor = item,
-				BaseC0 = item.C0,
-				BaseC1 = item.C1,
-			}
-		end
-	end
-
-	-- Collect foot IK controls if configured
-	local feet: { FootData } = {}
-	local controller = visual:FindFirstChildOfClass("AnimationController")
-	if controller and root then
-		for _, side in { "Left", "Right" } do
-			local target = root:FindFirstChild(side .. "FootTarget")
-			local ik = controller:FindFirstChild(side .. "FootIK")
-			local footPart = visual:FindFirstChild(side .. "Foot")
-			if target and target:IsA("Attachment") and ik and ik:IsA("IKControl") and footPart and footPart:IsA("BasePart") then
-				table.insert(feet, {
-					Target = target,
-					BaseTargetCF = target.CFrame,
-					IK = ik,
-					SoleOffset = footPart.Size.Y / 2,
-				})
-			end
-		end
-	end
-
-	return joints, feet
-end
-
 local function remove(source: Model)
 	local motion = motions[source]
 	if not motion then return end
 	for part, transparency in motion.Hidden do
-		if part and part.Parent then
-			part.LocalTransparencyModifier = transparency
-		end
+		if part.Parent then part.LocalTransparencyModifier = transparency end
 	end
+	for _, connection in motion.Connections do connection:Disconnect() end
 	motion.Visual:Destroy()
 	motions[source] = nil
 end
-
 local function add(source: Model)
 	if motions[source] or not source.Archivable then return end
 	local visual = source:Clone()
-	local hidden: { [BasePart]: number } = {}
-
 	for _, item in visual:GetDescendants() do
-		if item:IsA("BaseScript") or item:IsA("ModuleScript") then
-			item:Destroy()
-		end
+		if item:IsA("BaseScript") or item:IsA("ModuleScript") then item:Destroy() end
 	end
-
+	local joints, feet = Rig.Setup(visual)
+	visual.Parent = visuals
+	local frame = source:GetPivot()
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.RespectCanCollide = true
+	local motion: Motion = {
+		Visual = visual, Hidden = {}, Frame = frame, LastTarget = frame.Position,
+		Speed = 0, Phase = 0, Weight = 0, AirWeight = 0, Grounded = true,
+		VerticalSpeed = 0, Landing = 0, Yaw = 0, Turn = 0,
+		HeadYaw = 0, HeadPitch = 0, LookYaw = 0, LookPitch = 0, NextGlance = 0,
+		Joints = joints, Feet = feet, Params = params,
+		TeleportId = number(source, "CompanionTeleportId", 0), Pelvis = 0, Dirty = false, Connections = {},
+	}
+	reset(motion, frame)
 	for _, item in source:GetDescendants() do
 		if item:IsA("BasePart") then
-			hidden[item] = item.LocalTransparencyModifier
+			motion.Hidden[item] = item.LocalTransparencyModifier
 			item.LocalTransparencyModifier = 1
 		end
 	end
-
-	local joints, feet = setupVisualRig(visual)
-	visual.Parent = visuals
-	local frame = source:GetPivot()
-
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = { visual, source }
-	rayParams.RespectCanCollide = true
-
-	local ownerUserId = source:GetAttribute("OwnerUserId") :: number?
-	local _, initYaw, _ = frame.Rotation:ToEulerAnglesYXZ()
-
-	motions[source] = {
-		Source = source,
-		Visual = visual,
-		Hidden = hidden,
-		Frame = frame,
-		LastTarget = frame.Position,
-		Speed = 0,
-		Phase = math.random() * math.pi * 2,
-		Weight = 0,
-		PreviousY = frame.Position.Y,
-		VerticalSpeed = 0,
-		IsAirborne = false,
-		AirWeight = 0,
-		LandingSquash = 0,
-		LastYaw = initYaw,
-		TurnYawRate = 0,
-		HeadYaw = 0,
-		HeadPitch = 0,
-		TargetHeadYaw = 0,
-		TargetHeadPitch = 0,
-		NextGlanceTime = os.clock() + math.random(15, 30) / 10,
-		Joints = joints,
-		Feet = feet,
-		RayParams = rayParams,
-		OwnerUserId = ownerUserId,
+	motion.Connections = {
+		source.DescendantAdded:Connect(function() motion.Dirty = true end),
+		source.DescendantRemoving:Connect(function() motion.Dirty = true end),
 	}
+	motions[source] = motion
+end
+
+local function surfaceFrame(point: Vector3, normal: Vector3, facing: Vector3): CFrame
+	local forward = facing - normal * facing:Dot(normal)
+	if forward.Magnitude < 0.01 then forward = Vector3.new(0, 0, -1) end
+	return CFrame.lookAt(point, point + forward.Unit, normal)
+end
+
+local function feetPose(motion: Motion, stride: number, height: number, dt: number, alive: boolean): number
+	local root = motion.Visual.PrimaryPart
+	if not root then return 0 end
+	local pelvis = 0
+	for _, foot in motion.Feet do
+		local cycle = motion.Phase + (foot.Side - 1) * math.pi * 2 * 0.5
+		local forward, lift, stance = Math.Gait(cycle)
+		if motion.Weight < 0.05 then forward = 0; lift = 0; stance = true end
+		local base = root.CFrame * foot.BaseTargetCF
+		local desired = base.Position + motion.Frame.LookVector * (forward * stride * 0.5 * motion.Weight)
+		local hit = workspace:Raycast(desired + Vector3.new(0, height * 0.4, 0), Vector3.new(0, -height * 0.8, 0), motion.Params)
+		local usable = alive and motion.Grounded and hit ~= nil and motion.AirWeight < 0.5
+		if usable and hit then
+			local sole = hit.Position + hit.Normal * foot.SoleOffset
+			local correction = sole.Y - base.Position.Y
+			if math.abs(correction) > foot.Reach * 0.5 or hit.Normal.Y < 0.65 then usable = false
+			else
+				foot.Correction += (correction - foot.Correction) * (1 - math.exp(-18 * dt))
+				pelvis = math.min(pelvis, math.clamp(foot.Correction, -height * 0.1, height * 0.06))
+				local plant = foot.Plant
+				if foot.Support and not foot.Support.Parent then plant = nil end
+				if foot.Support and foot.Support.Parent and foot.SupportLocal then
+					plant = foot.Support.CFrame * foot.SupportLocal
+				end
+				if not stance then plant = nil end
+				if stance and (not foot.WasStance or not plant or (plant.Position - base.Position).Magnitude > foot.Reach * 0.65) then
+					plant = surfaceFrame(sole, hit.Normal, motion.Frame.LookVector) * motion.Frame.Rotation:ToObjectSpace(base.Rotation)
+					foot.Support = if hit.Instance:IsA("BasePart") then hit.Instance else nil
+					foot.SupportLocal = if foot.Support then foot.Support.CFrame:ToObjectSpace(plant :: CFrame) else nil
+				end
+				foot.Plant = plant
+				local target = plant or surfaceFrame(Vector3.new(sole.X, base.Position.Y + foot.Correction + lift * height * 0.12 * motion.Weight, sole.Z), hit.Normal, motion.Frame.LookVector) * motion.Frame.Rotation:ToObjectSpace(base.Rotation)
+				foot.Target.WorldCFrame = target
+			end
+		end
+		foot.WasStance = stance and usable
+		if not usable then foot.Plant = nil; foot.Support = nil; foot.SupportLocal = nil end
+		local weight = if usable then 1 - motion.AirWeight else 0
+		foot.IK.Weight += (weight - foot.IK.Weight) * (1 - math.exp(-18 * dt))
+		foot.IK.Enabled = foot.IK.Weight > 0.01
+	end
+	return pelvis
 end
 
 RunService.RenderStepped:Connect(function(deltaTime: number)
 	local runtime = workspace:FindFirstChild("RuntimeCompanions")
 	if runtime then
-		for _, source in runtime:GetChildren() do
-			if source:IsA("Model") then add(source) end
-		end
+		for _, source in runtime:GetChildren() do if source:IsA("Model") then add(source) end end
 	end
-
 	local dt = math.min(deltaTime, 0.1)
 	local blend = 1 - math.exp(-14 * dt)
-
+	local poseBlend = 1 - math.exp(-22 * dt)
+	local now = os.clock()
+	local serverNow = workspace:GetServerTimeNow()
+	local excluded: {Instance} = {visuals}
+	if runtime then table.insert(excluded, runtime) end
+	for _, player in Players:GetPlayers() do if player.Character then table.insert(excluded, player.Character) end end
 	for source, motion in motions do
-		if source.Parent ~= runtime or runtime == nil then
-			remove(source)
-			continue
-		end
-
+		if not runtime or source.Parent ~= runtime then remove(source); continue end
+		-- Rebuild incomplete streamed clones only when their hierarchy changes.
+		if motion.Dirty then remove(source); add(source); continue end
+		motion.Params.FilterDescendantsInstances = excluded
 		local target = source:GetPivot()
-		local displacement = target.Position - motion.LastTarget
-		motion.LastTarget = target.Position
-
-		-- Teleports and respawns must never fly across the map
-		if displacement.Magnitude > 25 then
-			motion.Frame = target
-			motion.Speed = 0
-			motion.Weight = 0
-			motion.AirWeight = 0
-			motion.LandingSquash = 0
-			motion.PreviousY = target.Position.Y
+		local teleportId = number(source, "CompanionTeleportId", 0)
+		if teleportId ~= motion.TeleportId or (target.Position - motion.LastTarget).Magnitude > 25 then
+			reset(motion, target); motion.TeleportId = teleportId
 		end
-
+		motion.LastTarget = target.Position
 		local previous = motion.Frame
 		local position = previous.Position:Lerp(target.Position, blend)
-		local rotation = previous.Rotation:Lerp(target.Rotation, 1 - math.exp(-9 * dt))
+		local rotation = previous.Rotation:Lerp(target.Rotation, 1 - math.exp(-10 * dt))
 		motion.Frame = CFrame.new(position) * rotation
-
+		motion.Visual:PivotTo(motion.Frame)
 		local travel = position - previous.Position
-		local horizSpeed = Vector3.new(travel.X, 0, travel.Z).Magnitude / math.max(dt, 0.001)
-		motion.Speed += (horizSpeed - motion.Speed) * (1 - math.exp(-10 * dt))
-
-		-- Track turning yaw velocity to enable anticipatory head lead and banking
-		local _, currentYaw, _ = rotation:ToEulerAnglesYXZ()
-		local yawDelta = (currentYaw - motion.LastYaw)
-		yawDelta = (yawDelta + math.pi) % (2 * math.pi) - math.pi
-		local turnRate = yawDelta / math.max(dt, 0.001)
-		motion.TurnYawRate += (turnRate - motion.TurnYawRate) * (1 - math.exp(-8 * dt))
-		motion.LastYaw = currentYaw
-
-		local alive = (source:GetAttribute("Health") :: number? or 1) > 0
-		local weight = if alive then math.clamp(motion.Speed / 6, 0, 1) else 0
-		motion.Weight += (weight - motion.Weight) * blend
-
-		-- Track vertical movement and detect jumping/falling
-		local vy = (position.Y - motion.PreviousY) / math.max(dt, 0.001)
-		motion.VerticalSpeed += (vy - motion.VerticalSpeed) * (1 - math.exp(-12 * dt))
-		motion.PreviousY = position.Y
-
-		local groundHit = workspace:Raycast(position + Vector3.new(0, 1, 0), Vector3.new(0, -6, 0), motion.RayParams)
-		local groundDist = if groundHit then math.max(0, position.Y - groundHit.Position.Y) else 0
-
-		-- Detect jump via vertical speed or owner character jumping in follow mode
-		local isAirborne = groundDist > 0.65 or math.abs(motion.VerticalSpeed) > 3
-		local owner = if motion.OwnerUserId then Players:GetPlayerByUserId(motion.OwnerUserId) else nil
-		local ownerChar = owner and owner.Character
-		local ownerHumanoid = ownerChar and ownerChar:FindFirstChildOfClass("Humanoid")
-		if ownerHumanoid then
-			local state = ownerHumanoid:GetState()
-			if state == Enum.HumanoidStateType.Jumping or state == Enum.HumanoidStateType.Freefall then
-				isAirborne = true
-			end
+		local distance = Vector3.new(travel.X, 0, travel.Z).Magnitude
+		motion.Speed += (distance / math.max(deltaTime, 0.001) - motion.Speed) * (1 - math.exp(-12 * dt))
+		local _, yaw = rotation:ToEulerAnglesYXZ()
+		local yawDelta = (yaw - motion.Yaw + math.pi) % (2 * math.pi) - math.pi
+		motion.Turn += (yawDelta / math.max(deltaTime, 0.001) - motion.Turn) * (1 - math.exp(-10 * dt))
+		motion.Yaw = yaw
+		local alive = number(source, "Health", 1) > 0
+		local height = math.max(1, number(source, "CompanionRigHeight", 4))
+		local stride = math.max(0.6, number(source, "CompanionStrideLength", height * 0.65))
+		local label = source:GetAttribute("CompanionLocomotionState")
+		local verticalSpeed = number(source, "CompanionVerticalSpeed", travel.Y / math.max(deltaTime, 0.001))
+		motion.VerticalSpeed = verticalSpeed
+		local groundedAttribute = source:GetAttribute("CompanionGrounded")
+		local grounded: boolean
+		if type(groundedAttribute) == "boolean" then grounded = groundedAttribute
+		else
+			local offset = number(source, "CompanionGroundOffset", height / 2)
+			local hit = workspace:Raycast(position + Vector3.new(0, 0.3 - offset, 0), Vector3.new(0, -height, 0), motion.Params)
+			local clearance = if hit then position.Y - offset - hit.Position.Y else nil
+			grounded = Math.Grounded(clearance, motion.Grounded, verticalSpeed)
 		end
-
-		if motion.IsAirborne and not isAirborne then
-			motion.LandingSquash = 1.0
+		if grounded and not motion.Grounded then
+			motion.Landing = math.clamp(number(source, "CompanionLandingSpeed", 8) / 25, 0.15, 1)
 		end
-		motion.IsAirborne = isAirborne
-		motion.LandingSquash = math.max(0, motion.LandingSquash - dt * 4.5)
-
-		local targetAirWeight = if isAirborne and alive then 1 else 0
-		motion.AirWeight += (targetAirWeight - motion.AirWeight) * (1 - math.exp(-12 * dt))
-
-		-- Walking gait phase advances with ground speed
-		motion.Phase = (motion.Phase + motion.Speed * dt * 1.8) % (math.pi * 2)
+		motion.Grounded = grounded
+		motion.Landing = math.max(0, motion.Landing - dt * 3.5)
+		motion.AirWeight += ((if alive and not grounded then 1 else 0) - motion.AirWeight) * blend
+		local desiredWeight = if alive and grounded and motion.Speed > 0.15 then math.clamp(motion.Speed / (height * 0.8), 0, 1) else 0
+		motion.Weight += (desiredWeight - motion.Weight) * blend
+		if grounded and alive and distance > 0.001 then
+			motion.Phase = (motion.Phase + distance / stride * math.pi * 2) % (math.pi * 2)
+		end
 		local gait = motion.Phase
-		local swing = math.sin(gait) * motion.Weight * (1 - motion.AirWeight)
-
-		-- Organic idle head glancing and looking around behavior
-		local now = os.clock()
-		if now >= motion.NextGlanceTime then
-			local headPart = ownerChar and ownerChar:FindFirstChild("Head") :: BasePart?
-			if headPart and (headPart.Position - position).Magnitude < 20 and math.random() < 0.35 then
-				-- Look up at owner
-				local localTarget = motion.Frame:PointToObjectSpace(headPart.Position)
-				motion.TargetHeadYaw = math.clamp(-math.atan2(localTarget.X, -localTarget.Z), -math.rad(55), math.rad(55))
-				motion.TargetHeadPitch = math.clamp(math.asin(math.clamp(localTarget.Unit.Y, -1, 1)), -math.rad(20), math.rad(25))
+		local groundWeight = 1 - motion.AirWeight
+		local aw = motion.AirWeight
+		local breath = if alive then math.sin(now * 2.2) * (1 - motion.Weight) * groundWeight else 0
+		local owner = Players:GetPlayerByUserId(number(source, "OwnerUserId", 0))
+		local character = owner and owner.Character
+		if now >= motion.NextGlance then
+			local head = character and character:FindFirstChild("Head")
+			if head and head:IsA("BasePart") and (head.Position - position).Magnitude < 20 and math.random() < 0.35 then
+				local localTarget = motion.Frame:PointToObjectSpace(head.Position)
+				if localTarget.Magnitude > 0.01 then
+					motion.LookYaw = math.clamp(-math.atan2(localTarget.X, -localTarget.Z), -0.8, 0.8)
+					motion.LookPitch = math.clamp(math.asin(localTarget.Unit.Y), -0.3, 0.4)
+				end
 			else
-				local roll = math.random()
-				if roll < 0.4 then
-					motion.TargetHeadYaw = 0
-					motion.TargetHeadPitch = 0
-				elseif roll < 0.7 then
-					motion.TargetHeadYaw = -math.rad(math.random(22, 42))
-					motion.TargetHeadPitch = math.rad(math.random(-6, 8))
-				else
-					motion.TargetHeadYaw = math.rad(math.random(22, 42))
-					motion.TargetHeadPitch = math.rad(math.random(-6, 8))
-				end
+				motion.LookYaw = math.rad(math.random(-35, 35)); motion.LookPitch = math.rad(math.random(-6, 8))
 			end
-			motion.NextGlanceTime = now + math.random(22, 45) / 10
+			motion.NextGlance = now + math.random(22, 45) / 10
 		end
-
-		local glanceBlend = 1 - math.exp(-6 * dt)
-		motion.HeadYaw += (motion.TargetHeadYaw - motion.HeadYaw) * glanceBlend
-		motion.HeadPitch += (motion.TargetHeadPitch - motion.HeadPitch) * glanceBlend
-
-		-- Head leads turning direction
-		local headLeadYaw = math.clamp(-motion.TurnYawRate * 0.22, -math.rad(28), math.rad(28))
-		local walkNod = math.sin(gait * 2) * math.rad(1.5) * motion.Weight * (1 - motion.AirWeight)
-
-		-- Joint references
-		local j = motion.Joints
-		local bodyJoint = getJoint(j, "Body", "Root", "RootJoint")
-		local headJoint = getJoint(j, "HeadTurn", "Neck", "Head")
-		local lShoulder = getJoint(j, "LeftShoulder", "Left Shoulder", "LeftUpperArm")
-		local rShoulder = getJoint(j, "RightShoulder", "Right Shoulder", "RightUpperArm")
-		local lElbow = getJoint(j, "LeftElbow", "Left Elbow", "LeftLowerArm")
-		local rElbow = getJoint(j, "RightElbow", "Right Elbow", "RightLowerArm")
-		local lWrist = getJoint(j, "LeftWrist", "LeftHand")
-		local rWrist = getJoint(j, "RightWrist", "RightHand")
-		local lHip = getJoint(j, "LeftHip", "Left Hip", "LeftUpperLeg")
-		local rHip = getJoint(j, "RightHip", "Right Hip", "RightUpperLeg")
-		local lKnee = getJoint(j, "LeftKnee", "Left Knee", "LeftLowerLeg")
-		local rKnee = getJoint(j, "RightKnee", "Right Knee", "RightLowerLeg")
-		local lAnkle = getJoint(j, "LeftAnkle", "LeftFoot")
-		local rAnkle = getJoint(j, "RightAnkle", "RightFoot")
-
-		-- Check combat attack state
-		local animState = source:GetAttribute("CompanionAnimationState") :: string?
-		local lastAttack = source:GetAttribute("LastAttackTime") :: number? or 0
-		local isAttacking = animState == "Attack" or (now - lastAttack < 0.45)
-
-		-- 1. Torso Motion (Bobbing, Breathing, Forward Lean, Bank, Squash)
-		local groundPhaseWeight = (1 - motion.AirWeight)
-		local bob = (1 - math.cos(gait * 2)) * 0.08 * motion.Weight * groundPhaseWeight
-		local idleBreath = if alive then (1 + math.sin(now * 2.2)) * 0.018 * (1 - motion.Weight) * groundPhaseWeight else 0
-		local squashY = -motion.LandingSquash * 0.22
-		local leanPitch = math.rad(-4) * motion.Weight * groundPhaseWeight + (if motion.AirWeight > 0.05 then math.rad(-8) * motion.AirWeight else 0)
-		local swayRoll = math.sin(gait) * math.rad(3.5) * motion.Weight * groundPhaseWeight
-		local bankRoll = math.clamp(-motion.TurnYawRate * 0.12, -math.rad(7), math.rad(7))
-
-		if alive then
-			poseJoint(bodyJoint, CFrame.new(0, bob + idleBreath + squashY, 0) * CFrame.Angles(leanPitch, 0, swayRoll + bankRoll))
-		else
-			poseJoint(bodyJoint, CFrame.Angles(math.rad(18), 0, 0))
-		end
-
-		-- 2. Head Articulation
-		if alive then
-			local headAirPitch = if motion.AirWeight > 0.05 then math.rad(10) * motion.AirWeight else 0
-			poseJoint(headJoint, CFrame.Angles(motion.HeadPitch + walkNod + headAirPitch, motion.HeadYaw + headLeadYaw, 0))
-		else
-			poseJoint(headJoint, CFrame.Angles(-math.rad(30), 0, 0))
-		end
-
-		-- 3. Arm and Shoulder Articulation
-		if alive and isAttacking then
-			local strike = (math.sin(now * 10) + 1) * 0.5
-			poseJoint(rShoulder, CFrame.Angles(-math.rad(35) - strike * math.rad(55), 0, math.rad(8)))
-			poseJoint(rElbow, CFrame.Angles(-math.rad(45) + strike * math.rad(35), 0, 0))
-			poseJoint(lShoulder, CFrame.Angles(math.rad(22), math.rad(12), -math.rad(16)))
-			poseJoint(lElbow, CFrame.Angles(-math.rad(65), 0, 0))
-		elseif alive then
-			local breathShoulder = math.sin(now * 2.2) * math.rad(1.5) * (1 - motion.Weight) * groundPhaseWeight
-			local armPitchL = swing * math.rad(36)
-			local armPitchR = -swing * math.rad(36)
-			local shoulderYawL = swing * math.rad(6)
-			local shoulderYawR = -swing * math.rad(6)
-			local shoulderRollL = -math.rad(3) - swing * math.rad(2.5) + breathShoulder
-			local shoulderRollR = math.rad(3) + swing * math.rad(2.5) - breathShoulder
-
-			local elbowL = math.rad(-8) - math.max(0, swing) * math.rad(40) - math.max(0, -swing) * math.rad(8)
-			local elbowR = math.rad(-8) - math.max(0, -swing) * math.rad(40) - math.max(0, swing) * math.rad(8)
-
-			-- Jump blending for arms
-			if motion.AirWeight > 0.01 then
-				local aw = motion.AirWeight
-				local jumpPitch = math.rad(26)
-				local jumpRollL = -math.rad(20)
-				local jumpRollR = math.rad(20)
-				local jumpElbow = math.rad(-35)
-
-				armPitchL = armPitchL * (1 - aw) + jumpPitch * aw
-				armPitchR = armPitchR * (1 - aw) + jumpPitch * aw
-				shoulderRollL = shoulderRollL * (1 - aw) + jumpRollL * aw
-				shoulderRollR = shoulderRollR * (1 - aw) + jumpRollR * aw
-				elbowL = elbowL * (1 - aw) + jumpElbow * aw
-				elbowR = elbowR * (1 - aw) + jumpElbow * aw
+		motion.HeadYaw += (motion.LookYaw - motion.HeadYaw) * (1 - math.exp(-6 * dt))
+		motion.HeadPitch += (motion.LookPitch - motion.HeadPitch) * (1 - math.exp(-6 * dt))
+		local pelvis = feetPose(motion, stride, height, dt, alive)
+		motion.Pelvis += (pelvis - motion.Pelvis) * blend
+		local bob = (1 - math.cos(gait * 2)) * height * 0.012 * motion.Weight
+		local bodyY = bob + breath * height * 0.0045 - motion.Landing * height * 0.045 + motion.Pelvis
+		local lean = -0.07 * motion.Weight - aw * (if verticalSpeed > 0 then 0.1 else -0.03)
+		local bank = math.clamp(-motion.Turn * 0.08, -0.1, 0.1) * motion.Weight
+		local function pose(name: string, offset: CFrame) Rig.Pose(motion.Joints, name, offset, poseBlend) end
+		pose("Body", if alive then CFrame.new(0, bodyY, 0) * CFrame.Angles(lean, 0, bank + math.sin(gait) * 0.035 * motion.Weight) else CFrame.Angles(0.3, 0, 0))
+		pose("HeadTurn", if alive then CFrame.Angles(motion.HeadPitch + math.sin(gait * 2) * 0.02 * motion.Weight, motion.HeadYaw + math.clamp(-motion.Turn * 0.2, -0.4, 0.4), 0) else CFrame.Angles(-0.5, 0, 0))
+		local attackWeight, strike = Math.Attack(serverNow - number(source, "LastAttackTime", -math.huge))
+		if not alive then attackWeight = 0 end
+		for index, side in {"Left", "Right"} do
+			local sign = if index == 1 then -1 else 1
+			local phase = gait + (index - 1) * math.pi
+			local forward, lift = Math.Gait(phase)
+			local leg = forward * motion.Weight
+			local arm = -leg
+			local pitch = arm * math.rad(30) * groundWeight
+			local roll = sign * math.rad(3) - sign * breath * math.rad(1)
+			local elbow = -math.rad(10) - math.max(0, -arm) * math.rad(28)
+			local wrist = CFrame.Angles(0, -sign * 0.1, sign * 0.05)
+			pitch = pitch * (1 - aw) + (if verticalSpeed > 0 then 0.35 else -0.12) * aw
+			roll = roll * (1 - aw) + sign * (if verticalSpeed > 0 then 0.3 else 0.45) * aw
+			elbow = elbow * (1 - aw) - 0.6 * aw
+			if attackWeight > 0 then
+				local attackPitch = if index == 2 then -0.5 - strike * 1.05 else 0.2
+				pitch += (attackPitch - pitch) * attackWeight
+				roll += (sign * 0.2 - roll) * attackWeight
+				elbow += ((if index == 2 then -0.8 + strike * 0.65 else -1.1) - elbow) * attackWeight
+				wrist = wrist:Lerp(CFrame.identity, attackWeight)
 			end
-
-			poseJoint(lShoulder, CFrame.Angles(armPitchL, shoulderYawL, shoulderRollL))
-			poseJoint(rShoulder, CFrame.Angles(armPitchR, shoulderYawR, shoulderRollR))
-			poseJoint(lElbow, CFrame.Angles(elbowL, 0, 0))
-			poseJoint(rElbow, CFrame.Angles(elbowR, 0, 0))
-			poseJoint(lWrist, CFrame.Angles(0, math.rad(8), math.rad(-5)))
-			poseJoint(rWrist, CFrame.Angles(0, -math.rad(8), math.rad(5)))
-		else
-			-- Defeated limp posture
-			poseJoint(lShoulder, CFrame.Angles(math.rad(12), 0, -math.rad(4)))
-			poseJoint(rShoulder, CFrame.Angles(math.rad(12), 0, math.rad(4)))
-			poseJoint(lElbow, CFrame.Angles(-math.rad(5), 0, 0))
-			poseJoint(rElbow, CFrame.Angles(-math.rad(5), 0, 0))
-		end
-
-		-- 4. Leg Articulation
-		if alive then
-			local hipPitchL = -swing * math.rad(28)
-			local hipPitchR = swing * math.rad(28)
-			local kneeL = math.rad(-4) - math.max(0, -swing) * math.rad(36)
-			local kneeR = math.rad(-4) - math.max(0, swing) * math.rad(36)
-			local ankleL = -hipPitchL - kneeL
-			local ankleR = -hipPitchR - kneeR
-
-			-- Jump blending for legs (tucking up in mid-air)
-			if motion.AirWeight > 0.01 then
-				local aw = motion.AirWeight
-				local jumpHip = math.rad(24)
-				local jumpKnee = math.rad(-42)
-				hipPitchL = hipPitchL * (1 - aw) + jumpHip * aw
-				hipPitchR = hipPitchR * (1 - aw) + jumpHip * aw
-				kneeL = kneeL * (1 - aw) + jumpKnee * aw
-				kneeR = kneeR * (1 - aw) + jumpKnee * aw
-				ankleL = ankleL * (1 - aw)
-				ankleR = ankleR * (1 - aw)
-			end
-
-			poseJoint(lHip, CFrame.Angles(hipPitchL, 0, -math.rad(2)))
-			poseJoint(rHip, CFrame.Angles(hipPitchR, 0, math.rad(2)))
-			poseJoint(lKnee, CFrame.Angles(kneeL, 0, 0))
-			poseJoint(rKnee, CFrame.Angles(kneeR, 0, 0))
-			poseJoint(lAnkle, CFrame.Angles(ankleL, 0, 0))
-			poseJoint(rAnkle, CFrame.Angles(ankleR, 0, 0))
-
-			-- Update foot IK targets if IK is available
-			if #motion.Feet > 0 and motion.Visual.PrimaryPart then
-				local stride = math.clamp(tonumber(source:GetAttribute("CompanionStride")) or 0.5, 0, 0.8)
-				local height = math.clamp(tonumber(source:GetAttribute("CompanionStepHeight")) or 0.3, 0, 0.6)
-				local primaryCF = motion.Visual.PrimaryPart.CFrame
-
-				for index, foot in motion.Feet do
-					local cycle = gait + (index - 1) * math.pi
-					local lift = math.max(0, math.sin(cycle)) * height * motion.Weight * groundPhaseWeight
-					local localCF = foot.BaseTargetCF * CFrame.new(0, 0, math.cos(cycle) * stride * motion.Weight)
-					local desired = primaryCF * localCF
-					local hit = workspace:Raycast(desired.Position + Vector3.new(0, 1.1, 0), Vector3.new(0, -2.6, 0), motion.RayParams)
-					foot.IK.Enabled = hit ~= nil and motion.AirWeight < 0.5
-					if hit then
-						local correction = math.clamp(hit.Position.Y + foot.SoleOffset - desired.Position.Y, -0.5, 0.45)
-						local world = desired + Vector3.new(0, correction + lift, 0)
-						foot.Target.CFrame = primaryCF:ToObjectSpace(world)
-					end
-				end
-			end
-		end
-
-		-- 5. Position Visual Root (if no Body joint exists, apply full sway directly to visual)
-		if not bodyJoint then
-			motion.Visual:PivotTo(motion.Frame * CFrame.new(0, bob + idleBreath + squashY, 0) * CFrame.Angles(leanPitch, 0, swayRoll + bankRoll))
-		else
-			motion.Visual:PivotTo(motion.Frame)
+			if not alive then pitch = 0.2; roll = sign * 0.07; elbow = -0.08; wrist = CFrame.identity end
+			pose(side .. "Shoulder", CFrame.Angles(pitch, arm * 0.05 * groundWeight, roll))
+			pose(side .. "Elbow", CFrame.Angles(elbow, 0, 0))
+			pose(side .. "Wrist", wrist)
+			local stepLift = if label == "StepUp" then 1.3 else 1
+			local hip = -leg * math.rad(27)
+			local knee = -0.04 - lift * math.rad(48) * motion.Weight * stepLift
+			hip = hip * (1 - aw) + (if verticalSpeed > 0 then 0.4 else 0.12) * aw
+			knee = knee * (1 - aw) + (if verticalSpeed > 0 then -0.8 else -0.25) * aw - motion.Landing * 0.25
+			local ankle = -(hip + knee) * groundWeight
+			if not alive then hip = 0; knee = -0.1; ankle = 0 end
+			pose(side .. "Hip", CFrame.Angles(hip, 0, sign * 0.025))
+			pose(side .. "Knee", CFrame.Angles(knee, 0, 0))
+			pose(side .. "Ankle", CFrame.Angles(ankle, 0, 0))
 		end
 	end
 end)

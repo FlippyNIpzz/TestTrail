@@ -24,7 +24,15 @@ function Theme.Make(className: string, parent: Instance?, properties: { [string]
 	if object:IsA("GuiObject") then
 		object.BorderSizePixel = 0
 	end
-	if object:IsA("TextLabel") or object:IsA("TextButton") or object:IsA("TextBox") then
+	if object:IsA("TextLabel") then
+		object.Font = Enum.Font.Arcade
+		object.TextSize = 16
+		object.TextColor3 = Theme.Colors.Ink
+	elseif object:IsA("TextButton") then
+		object.Font = Enum.Font.Arcade
+		object.TextSize = 16
+		object.TextColor3 = Theme.Colors.Ink
+	elseif object:IsA("TextBox") then
 		object.Font = Enum.Font.Arcade
 		object.TextSize = 16
 		object.TextColor3 = Theme.Colors.Ink

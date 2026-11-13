@@ -8,6 +8,7 @@ local Config = require(script.Parent.CompanionData)
 local Rules = require(script.Parent.CompanionRules)
 local Collection = require(script.Parent.CompanionCollection)
 local World = require(script.Parent.CompanionWorld)
+local Locomotion = require(script.Parent.CompanionLocomotion)
 local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
 local Manager = {}
 local sessions: {[Player]: any} = {}
@@ -46,11 +47,13 @@ local function publish(player: Player)
 end
 local function destroyModel(session: any)
 	if session.Model then session.Model:Destroy() end
+	session.Locomotion = nil
 	session.Model = nil
 	session.ModelId = nil
 	session.Wander = nil
 	session.NextWander = 0
 	session.NeedsHomeTeleport = false
+	session.ChargeSlot = nil
 end
 local function homePosition(player: Player): Vector3?
 	if not Bases or not Assets then return nil end
@@ -86,6 +89,7 @@ local function spawn(player: Player, session: any, companion: Config.Companion)
 	model:PivotTo(CFrame.new(World.Ground(model, position)))
 	model.Parent = container
 	session.Model, session.ModelId = model, companion.Id
+	session.Locomotion = Locomotion.New(model)
 end
 local function defeat(player: Player, companion: Config.Companion)
 	companion.Health = 0
@@ -96,6 +100,7 @@ local function defeat(player: Player, companion: Config.Companion)
 		local home = homePosition(player)
 		if home and session.Model then
 			session.Model:PivotTo(CFrame.new(World.Ground(session.Model, home)))
+			if session.Locomotion then Locomotion.Reset(session.Locomotion) end
 			session.NeedsHomeTeleport = false
 		end
 	end
@@ -137,8 +142,11 @@ function Manager.Action(player: Player, action: any, id: any, secondId: any): an
 	if action == "Mode" then
 		local companion = equipped(player)
 		if type(id) ~= "string" or not Config.Modes[id] or not companion then return result(false, "Invalid mode.") end
-		if companion.Health <= 0 and id ~= "Home" then return result(false, "Recover health at Home first.") end
+		if companion.Health <= 0 then
+			if id ~= "Home" then return result(false, "Recover health at Home first.") end
+		end
 		if id == "Fight" and not World.Arena() then return result(false, "Arena boundary is unavailable.") end
+		if companion.Mode ~= id then session.ChargeSlot = nil; session.NextWander = 0 end
 		companion.Mode = id
 	elseif action == "Equip" or action == "Unequip" or action == "Fuse" then
 		if type(id) ~= "string" then return result(false, "Choose a companion.") end
@@ -187,11 +195,15 @@ local function step(player: Player, session: any, dt: number)
 		local home = homePosition(player)
 		if home and session.NeedsHomeTeleport then
 			model:PivotTo(CFrame.new(World.Ground(model, home)))
+			Locomotion.Reset(session.Locomotion)
 			position = model:GetPivot().Position
 			session.NeedsHomeTeleport = false
 		end
 		if home then
-			local station = Assets.GetChargeStationModel(player)
+			local slot = Assets.SelectChargeStation(player, session.ChargeSlot)
+			if slot ~= session.ChargeSlot then session.NextWander = 0; session.Wander = nil end
+			session.ChargeSlot = slot
+			local station = if slot then Assets.GetChargeStationModel(player, slot) else nil
 			local center = World.Position(station) or home
 			if os.clock() >= session.NextWander then
 				local angle = math.random() * math.pi * 2
@@ -200,18 +212,27 @@ local function step(player: Player, session: any, dt: number)
 			end
 			target = session.Wander or home
 			if station and (position - center).Magnitude <= Config.StationRange then
-				local state = Assets.GetChargeStationData(player)
+				local state = Assets.GetChargeStationData(player, slot)
 				local amount = state and math.min(state.PowerStored, dt * Config.StationTransferRate) or 0
-				if amount > 0 and Assets.TryConsumeCharge(player, amount) then Rules.Recharge(companion, amount) end
+				if amount > 0 and Assets.TryConsumeCharge(player, amount, slot) then
+					Rules.Recharge(companion, amount)
+					if state and amount >= state.PowerStored then
+						session.ChargeSlot = Assets.SelectChargeStation(player, slot, true)
+						session.NextWander = 0; session.Wander = nil
+					end
+				end
 			end
 		end
 	elseif companion.Mode == "Follow" then
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") then
-			target = (root.CFrame * CFrame.new(Config.FollowOffset)).Position
-			if (target - position).Magnitude > Config.FollowTeleportDistance then
-				model:PivotTo(CFrame.new(World.Ground(model, target)))
+			local followTarget = (root.CFrame * CFrame.new(Config.FollowOffset)).Position
+			target = followTarget
+			if (followTarget - position).Magnitude > Config.FollowTeleportDistance then
+				local ground = World.Ground(model, followTarget) or followTarget
+				model:PivotTo(CFrame.new(ground))
+				Locomotion.Reset(session.Locomotion)
 				position = model:GetPivot().Position
 			end
 		end
@@ -247,21 +268,15 @@ local function step(player: Player, session: any, dt: number)
 		end
 	end
 	local values = Rules.Values(companion)
+	local speed = values.Speed * (if companion.Charge <= 0 then Config.ExhaustedSpeedMultiplier else 1)
+	Locomotion.Step(session.Locomotion, target, speed, dt, companion.Health > 0, companion.Mode)
 	if target then
-		local grounded = World.Ground(model, target)
-		local delta = grounded - position
-		local speed = values.Speed * (if companion.Charge <= 0 then Config.ExhaustedSpeedMultiplier else 1)
-		if delta.Magnitude > 0.1 then
-			local nextPosition = position + delta.Unit * math.min(delta.Magnitude, speed * dt)
-			local facing = Vector3.new(delta.X, 0, delta.Z)
-			model:PivotTo(if facing.Magnitude > 0.01 then CFrame.lookAt(nextPosition, nextPosition + facing) else CFrame.new(nextPosition))
-		end
 		if arena and companion.Mode == "Fight" and companion.Health > 0 and (victimPlayer or victimHumanoid)
 			and World.InArena(arena, model:GetPivot().Position) and World.InArena(arena, target)
 			and (model:GetPivot().Position - target).Magnitude <= Config.AttackRange and os.clock() >= session.NextAttack then
 			session.NextAttack = os.clock() + Config.AttackInterval
 			companion.Charge = math.max(0, companion.Charge - Config.AttackChargeCost)
-			model:SetAttribute("LastAttackTime", os.clock())
+			model:SetAttribute("LastAttackTime", workspace:GetServerTimeNow())
 			if victimPlayer then Manager.Damage(victimPlayer, values.Damage)
 			elseif victimHumanoid then victimHumanoid:TakeDamage(values.Damage) end
 		end
@@ -291,7 +306,7 @@ function Manager.Init()
 		local stepTime = math.min(elapsed, 0.5)
 		elapsed = 0
 		for player, session in pairs(sessions) do
-			local ok, err = pcall(step, player, session, stepTime)
+			local ok, err = pcall(function() step(player, session, stepTime) end)
 			if not ok and not session.Warned then warn("[Companion] " .. tostring(err)); session.Warned = true end
 			if replication >= 1 then publish(player) end
 		end

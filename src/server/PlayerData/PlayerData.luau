@@ -22,6 +22,9 @@ PlayerData.DEFAULT_DATA = {
 	CompanionId = "ElectricCommon",
 } :: PlayerDataSchema
 
+-- Disable loading and saving during testing; existing saved data is preserved.
+PlayerData.PERSISTENCE_ENABLED = false
+
 PlayerData.DATASTORE_NAME = "PlayerSaveData_v1"
 PlayerData.AUTOSAVE_INTERVAL = 300
 

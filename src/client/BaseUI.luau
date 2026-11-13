@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Theme = require(script.Parent.UITheme)
+local Modal = require(script.Parent.ModalController)
 local UI = {}
 local initialized = false
 function UI.Init()
@@ -12,12 +13,16 @@ function UI.Init()
     local player = Players.LocalPlayer
     local screen = Instance.new("ScreenGui")
     screen.Name = "BaseUI"; screen.ResetOnSpawn = false; screen.DisplayOrder = 5
+    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screen.Parent = player:WaitForChild("PlayerGui")
     local launch = Theme.Button(screen, { Name = "BaseButton", Position = UDim2.fromOffset(18, 104),
         Size = UDim2.fromOffset(130, 38), Text = "BASE", BackgroundColor3 = Theme.Colors.Navy, TextColor3 = Theme.Colors.Cream })
+    local backdrop = Theme.Make("TextButton", screen, { Name = "Backdrop", Size = UDim2.fromScale(1, 1),
+        Text = "", BackgroundColor3 = Theme.Colors.Ink, BackgroundTransparency = 0.45,
+        AutoButtonColor = false, Visible = false, ZIndex = 2 })
     local panel = Theme.Panel(screen, { Name = "BasePanel", AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(0.9, 0.8), Visible = false,
-        BackgroundColor3 = Theme.Colors.Panel })
+        BackgroundColor3 = Theme.Colors.Panel, ZIndex = 3 })
     local limit = Instance.new("UISizeConstraint")
     limit.MaxSize = Vector2.new(500, 560); limit.Parent = panel
     local title = Theme.Make("TextLabel", panel, { Position = UDim2.fromOffset(18, 16), Size = UDim2.new(1, -76, 0, 30),
@@ -34,12 +39,14 @@ function UI.Init()
         Text = "Loading…", TextSize = 13, TextWrapped = true, BackgroundColor3 = Theme.Colors.Green, TextColor3 = Theme.Colors.Cream })
     local toast = Theme.Make("TextLabel", screen, { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 0.94),
         Size = UDim2.new(0.85, 0, 0, 62), TextSize = 14, TextWrapped = true, Visible = false,
-        BackgroundColor3 = Theme.Colors.Navy, TextColor3 = Theme.Colors.Cream }) :: TextLabel
+        BackgroundColor3 = Theme.Colors.Navy, TextColor3 = Theme.Colors.Cream, ZIndex = 4 }) :: TextLabel
     local busy = false
     local allowed = false
     local function refresh(action: string)
         if busy then return end
         busy = true
+        upgrade.Active = false
+        upgrade.AutoButtonColor = false
         local ok, result = pcall(function() return Remotes.BaseAction:InvokeServer(action) end)
         busy = false
         if ok and type(result) == "table" then
@@ -48,13 +55,31 @@ function UI.Init()
             allowed = result.CanUpgrade == true
             upgrade.AutoButtonColor = allowed
             upgrade.BackgroundColor3 = if allowed then Theme.Colors.Green else Theme.Colors.Muted
-        elseif not ok then
-            allowed = false; details.Text = "Unable to load your base. Close and reopen to retry."
+        else
+            allowed = false; details.Text = "Unable to load your base. Retrying automatically…"
             upgrade.Text = "UNAVAILABLE"
+            upgrade.BackgroundColor3 = Theme.Colors.Muted
         end
+        upgrade.Active = allowed
+        upgrade.AutoButtonColor = allowed
     end
-    launch.Activated:Connect(function() panel.Visible = not panel.Visible; if panel.Visible then refresh("Get") end end)
-    close.Activated:Connect(function() panel.Visible = false end)
+    local closePanel: () -> ()
+    closePanel = function()
+        screen.DisplayOrder = 5
+        panel.Visible = false
+        backdrop.Visible = false
+        Modal.Release(closePanel)
+    end
+    launch.Activated:Connect(function()
+        if panel.Visible then closePanel(); return end
+        Modal.Open(closePanel)
+        screen.DisplayOrder = 10
+        panel.Visible = true
+        backdrop.Visible = true
+        refresh("Get")
+    end)
+    close.Activated:Connect(closePanel)
+    backdrop.Activated:Connect(closePanel)
     upgrade.Activated:Connect(function() if allowed then refresh("Upgrade") end end)
     local messageId = 0
     Remotes.BaseFeedback.OnClientEvent:Connect(function(success: boolean, message: string)

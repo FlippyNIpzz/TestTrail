@@ -25,8 +25,34 @@ local worldFolder = Workspace:FindFirstChild("World") or Instance.new("Folder", 
 worldFolder.Name = "World"
 local basesFolder = worldFolder:FindFirstChild("Bases") or Instance.new("Folder", worldFolder)
 basesFolder.Name = "Bases"
-local assetsFolder = ServerStorage:WaitForChild("Assets", 5) or ReplicatedStorage:WaitForChild("Assets")
-local baseModelsFolder = assetsFolder:WaitForChild("Base_Models")
+-- Resolve on demand so assets added after module loading are available immediately.
+local function assetRoots(): { Instance }
+    local roots: { Instance } = {}
+    local scene = Workspace:FindFirstChild("Game")
+    local base = scene and scene:FindFirstChild("Base")
+    if base then table.insert(roots, base) end
+    for _, service in { Workspace, ServerStorage, ReplicatedStorage } do
+        local assets = service:FindFirstChild("Assets")
+        if assets then table.insert(roots, assets) end
+    end
+    return roots
+end
+local function assetFolder(name: string): Instance?
+    for _, root in assetRoots() do
+        local folder = root:FindFirstChild(name)
+        if folder then return folder end
+        if name == "Base_Models" and root:FindFirstChild("Base_Level_1") then return root end
+    end
+    return nil
+end
+local function baseTemplate(name: string): Instance?
+    for _, root in assetRoots() do
+        local folder = root:FindFirstChild("Base_Models") or root
+        local template = folder:FindFirstChild(name)
+        if template then return template end
+    end
+    return nil
+end
 
 function BaseManager.Feedback(player: Player, success: boolean, message: string): Result
     if player.Parent == Players then Remotes.BaseFeedback:FireClient(player, success, message) end
@@ -43,13 +69,13 @@ function BaseManager.IsOwner(player: Player, index: number): boolean
     return base ~= nil and base.Player == player
 end
 function BaseManager.SetAssetCreatedCallback(callback: ((Player, string, Instance) -> ())?) assetCreatedCallback = callback end
-function BaseManager.GetAssetFolder(name: string): Instance? return assetsFolder:FindFirstChild(name) end
+function BaseManager.GetAssetFolder(name: string): Instance? return assetFolder(name) end
 function BaseManager.GetZoneCatalog(): { ZoneCatalog.LevelInfo }
-    return ZoneCatalog.Levels(baseModelsFolder)
+    return ZoneCatalog.Levels(assetFolder("Base_Models"))
 end
 function BaseManager.GetPlayerZones(player: Player): ({ ZoneCatalog.ZoneInfo }, string?)
     local base = BaseManager.GetBaseForPlayer(player)
-    return ZoneCatalog.Read(if base then base.Model else nil)
+    return ZoneCatalog.Read(if base then base.Model else nil, if base then base.Level else 1)
 end
 function BaseManager.Near(player: Player, position: Vector3): boolean
     local character = player.Character
@@ -136,8 +162,8 @@ end
 local function savedTemplate(player: Player, zone: string): string
     local profile = Data.GetProfile(player)
     local state = profile and profile.Base
-    if zone == "Zone1" then return Config.ForgeTiers[if state then state.Forge.Tier else 1].ModelName end
-    return Config.ChargeTiers[if state then state.ChargeStation.Tier else 1].ModelName
+    if Config.Zones[zone].AssetType == "Forge" then return Config.ForgeTiers[if state then state.Forge.Tier else 1].ModelName end
+    return Config.ChargeTiers[if state then state.ChargeStations[zone].Tier else 1].ModelName
 end
 local function place(player: Player, zonePart: BasePart, placed: Instance): boolean
     local config = Config.Zones[zonePart.Name]
@@ -160,7 +186,7 @@ local function hideZone(zone: BasePart)
     local prompt = zone:FindFirstChild("ZonePrompt")
     if prompt then prompt:Destroy() end
 end
-local function setupZonePrompts(base: BaseAssignment)
+local function setupZonePrompts(base: BaseAssignment, layoutLevel: number?)
     local model = base.Model
     if not model then return end
     local zones = model:FindFirstChild("Zones")
@@ -174,6 +200,8 @@ local function setupZonePrompts(base: BaseAssignment)
         local oldPrompt = part:FindFirstChild("ZonePrompt")
         if oldPrompt then oldPrompt:Destroy() end
         local owner = base.Player
+        local unlocked = Config.HasSlot(layoutLevel or base.Level, zone)
+        if not unlocked then continue end
         if owner and base.PurchasedZones[zone] and place(owner, part, placed) then hideZone(part); continue end
         local prompt = Instance.new("ProximityPrompt")
         prompt.Name = "ZonePrompt"
@@ -202,7 +230,8 @@ local function setupZonePrompts(base: BaseAssignment)
         end
         prompt.Triggered:Connect(function(player: Player)
             BaseManager.Transaction(player, function()
-                if base.Player ~= player or not BaseManager.Near(player, part.Position) then
+                if base.Player ~= player or base.Model ~= model or not Config.HasSlot(base.Level, zone)
+                    or not BaseManager.Near(player, part.Position) then
                     return { Success = false, Message = "Stand near a zone in your own base." }
                 end
                 if not config or not config.Available then return { Success = false, Message = "Coming soon." } end
@@ -225,11 +254,9 @@ local function setupZonePrompts(base: BaseAssignment)
     end
 end
 -- Validate the exact next-level template before touching the live base.
-local function requiredZones(purchased: { [string]: boolean }, placed: Instance?): { [string]: boolean }
+local function requiredZones(level: number, purchased: { [string]: boolean }, placed: Instance?): { [string]: boolean }
     local required: { [string]: boolean } = {}
-    for name, config in pairs(Config.Zones) do
-        if config.Available then required[name] = true end
-    end
+    for _, name in ipairs(Config.BaseLevels[level].Slots) do required[name] = true end
     for name, owned in pairs(purchased) do if owned then required[name] = true end end
     if placed then
         for _, asset in ipairs(placed:GetChildren()) do required[asset.Name] = true end
@@ -238,7 +265,7 @@ local function requiredZones(purchased: { [string]: boolean }, placed: Instance?
 end
 local function validateLayout(level: number, required: { [string]: boolean }): (Model?, string)
     local name = "Base_Level_" .. level
-    local template = baseModelsFolder:FindFirstChild(name)
+    local template = baseTemplate(name)
     if not template or not template:IsA("Model") or not template.Archivable or not primary(template) then
         return nil, name .. " is unavailable or invalid."
     end
@@ -252,6 +279,7 @@ local function validateLayout(level: number, required: { [string]: boolean }): (
     for _, zone in ipairs(zones:GetChildren()) do
         if seen[zone.Name] then return nil, name .. " has duplicate zone " .. zone.Name .. "." end
         seen[zone.Name] = true
+        if not Config.HasSlot(level, zone.Name) then return nil, name .. " has unexpected zone " .. zone.Name .. "." end
         if zone:IsA("BasePart") then found[zone.Name] = true end
     end
     for zone in pairs(required) do
@@ -265,14 +293,14 @@ function BaseManager.GetLayoutAvailability(player: Player, level: number): (bool
     local base = BaseManager.GetBaseForPlayer(player)
     if not base then return false, "Base is not ready." end
     local placed = base.Model and base.Model:FindFirstChild("PlacedAssets")
-    local template, reason = validateLayout(level, requiredZones(base.PurchasedZones, placed))
+    local template, reason = validateLayout(level, requiredZones(level, base.PurchasedZones, placed))
     return template ~= nil, reason
 end
 local function replaceOwnedBase(player: Player, base: BaseAssignment, level: number): (boolean, string)
     local old = base.Model
     if not old then return false, "Current base is unavailable." end
     local oldPlaced = old:FindFirstChild("PlacedAssets")
-    local required = requiredZones(base.PurchasedZones, oldPlaced)
+    local required = requiredZones(level, base.PurchasedZones, oldPlaced)
     local template, reason = validateLayout(level, required)
     if not template then return false, reason end
     -- Every current asset must be movable and uniquely mapped; never silently drop one.
@@ -331,7 +359,7 @@ local function replaceOwnedBase(player: Player, base: BaseAssignment, level: num
         for _, asset in ipairs(restored) do
             if assetCreatedCallback then assetCreatedCallback(player, asset.Name, asset) end
         end
-        setupZonePrompts(base)
+        setupZonePrompts(base, level)
     end)
     if not ok then
         base.Model = old
@@ -354,12 +382,12 @@ local function updateBaseModel(base: BaseAssignment, layout: number): boolean
     local template: Instance? = nil
     if layout > 1 then
         -- Saved progression must restore its actual layout, never silently fall back to level 1.
-        local exact, reason = validateLayout(layout, requiredZones(base.PurchasedZones, nil))
+        local exact, reason = validateLayout(layout, requiredZones(layout, base.PurchasedZones, nil))
         if not exact then warn("[BaseManager] " .. reason); return false end
         template = exact
     else
-        template = base.LayoutTemplate or baseModelsFolder:FindFirstChild("Base_Level_" .. layout)
-            or baseModelsFolder:FindFirstChild("Base_Level_1") or baseModelsFolder:FindFirstChild("Base_Level_0")
+        template = base.LayoutTemplate or baseTemplate("Base_Level_" .. layout)
+            or baseTemplate("Base_Level_1") or baseTemplate("Base_Level_0")
     end
     if not template or not template:IsA("Model") or not template.Archivable then return false end
     if base.LayoutTemplate then

@@ -31,6 +31,42 @@ local rootPart = {Position=position, IsA=function() return true end}
 local humanoid = {Health=100}
 player.Character = {FindFirstChild=function() return rootPart end, FindFirstChildWhichIsA=function() return humanoid end}
 '''
+source += r'''
+local vectorMeta = {}
+local Vector3 = {new=function(x,y,z) return setmetatable({X=x,Y=y,Z=z}, vectorMeta) end}
+vectorMeta.__add = function(a,b) return Vector3.new(a.X+b.X,a.Y+b.Y,a.Z+b.Z) end
+vectorMeta.__sub = function(a,b) return Vector3.new(a.X-b.X,a.Y-b.Y,a.Z-b.Z) end
+local CFrame = {new=function(p) return {Position=p} end}
+local Enum = {PartType={Ball=1}, Material={Slate=1}}
+local Instance = {new=function()
+    local part = {Destroying={Connect=function() end}}
+    part.SetAttribute=function(self,k,v) self[k]=v end
+    part.Destroy=function(self) self.Parent=nil; self.Destroyed=true end
+    return part
+end}
+local sceneChildren, storedChildren = {}, {}
+local function node(children) return {FindFirstChild=function(_,name) return children[name] end} end
+workspace.FindFirstChild = function(_,name) return sceneChildren[name] end
+local oldService = game.GetService
+game.GetService = function(self,name)
+    if name == "ServerStorage" then return node(storedChildren) end
+    return oldService(self,name)
+end
+World.ArenaSurface = function(_,p,_,height) return Vector3.new(p.X,height,p.Z) end
+local cloned
+local function template()
+    return {Archivable=true, IsA=function(_,kind) return kind=="Model" end,
+        FindFirstChildWhichIsA=function() return {} end,
+        Clone=function()
+            local part = {IsA=function(_,kind) return kind=="BasePart" end}
+            cloned = {GetBoundingBox=function() return {Position=Vector3.new(0,2,0)},Vector3.new(4,4,4) end,
+                GetPivot=function() return Vector3.new(0,2,0) end,
+                PivotTo=function(self,p) self.Pivot=p end,
+                GetDescendants=function() return {part} end, Part=part}
+            return cloned
+        end}
+end
+'''
 code = (root / 'Arena.luau').read_text()
 code = re.sub(r'local (\w+) = require\([^\n]+\)', lambda m: f'local {m[1]} = {m[1]}', code)
 code = code.replace('return Arena\n', '''
@@ -99,6 +135,31 @@ clock = 104; Arena.CollectNearbyOre(); assert(awarded == 24)
 clock = 100; ore = Arena.TestDrop(2)
 Arena.CollectNearbyOre(); assert(awarded == 31)
 print("Arena: direct/automatic pickup, range, forge removal, cooldown, owner lock and theft checks passed")
+'''
+source += r'''
+Arena.TestOre()
+local location = Vector3.new(5,0,6)
+local fallback = Arena.SpawnOreAt({},"IronOre",location)
+assert(fallback and fallback.Transparency == nil and fallback.OreType == "IronOre")
+assert(Arena.SpawnOreAt({},"Unknown",location) == nil)
+local storageTemplate = template()
+storedChildren.ResourceModels = node({IronOre=storageTemplate})
+local storedOre = Arena.SpawnOreAt({},"IronOre",location)
+assert(storedOre.Transparency == 1 and cloned.Parent == storedOre)
+assert(cloned.Pivot.Y == 2 and cloned.Part.Anchored and not cloned.Part.CanCollide)
+local authoredTemplate = template()
+sceneChildren.Game = node({Arena=node({Resource_Models=node({IronOre=authoredTemplate})})})
+storageTemplate.Clone = function() error("Workspace template must take precedence") end
+local authoredOre = Arena.SpawnOreAt({},"IronOre",location)
+assert(cloned.Parent == authoredOre and authoredOre.Transparency == 1)
+local visual = cloned
+clock += 1
+assert(Arena.TryCollectOre(player,authoredOre))
+assert(authoredOre.Destroyed and visual.Parent == authoredOre, "Visual must be owned by destroyed pickup root")
+authoredTemplate.Archivable = false
+storedChildren.ResourceModels = nil
+assert(Arena.SpawnOreAt({},"IronOre",location).Transparency == nil)
+print("PASS: authored/storage ore spawning, precedence, procedural fallback and pickup ownership")
 '''
 with tempfile.TemporaryDirectory(prefix='arena-tests-') as directory:
     path = Path(directory) / 'arena.luau'

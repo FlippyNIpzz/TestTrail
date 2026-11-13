@@ -43,7 +43,8 @@ def main():
     if not args.analyze_only:
         results.append(run('Luau compilation', ['luau-compile', '--null', *files]))
         for suite in ['server/Arena/tests/run.py', 'server/Arena/tests/carry.py',
-                      'server/Arena/tests/geometry.py', 'server/Companion/tests/run.py']:
+                      'server/Arena/tests/geometry.py', 'server/Companion/tests/run.py',
+                      'server/Base/tests/run.py']:
             results.append(run(suite, [sys.executable, SRC / suite, shutil.which('luau')]))
         results.append(run('Rojo build', ['rojo', 'build', ROOT / 'default.project.json',
                                          '-o', LOCAL / 'verification.rbxlx']))

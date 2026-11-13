@@ -1,5 +1,6 @@
 --!strict
 local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
 local ServerStorage = game:GetService("ServerStorage")
 local Config = require(script.Parent.CompanionData)
 local Rules = require(script.Parent.CompanionRules)
@@ -7,12 +8,19 @@ local Collection = {}
 local random = Random.new()
 
 function Collection.Templates(): Instance?
-	local assets = ServerStorage:FindFirstChild("Assets")
-	return assets and (assets:FindFirstChild("Companions") or assets:FindFirstChild("Companion"))
+    local scene = Workspace:FindFirstChild("Game")
+    local companions = scene and scene:FindFirstChild("Companions")
+    if companions then return companions:FindFirstChild("CompanionModelGallery") or companions end
+    for _, service in { Workspace, ServerStorage } do
+        local assets = service:FindFirstChild("Assets")
+        local folder = assets and (assets:FindFirstChild("Companions") or assets:FindFirstChild("Companion"))
+        if folder then return folder:FindFirstChild("CompanionModelGallery") or folder end
+    end
+    return nil
 end
 
 function Collection.Identity(templateId: string): (string?, string?)
-	for rarity in pairs(Config.Rarities) do
+	for rarity: string in pairs(Config.Rarities) do
 		if string.sub(templateId, -#rarity) == rarity then
 			return string.sub(templateId, 1, #templateId - #rarity), rarity
 		end
@@ -60,10 +68,11 @@ function Collection.Load(raw: any, legacyId: string?): (any?, string?)
 				if template:IsA("Model") and rarity == "Common" then table.insert(candidates, template.Name) end
 			end
 		end
-		if #candidates == 0 then return nil, "No Common companion templates in ServerStorage.Assets.Companions" end
+		if #candidates == 0 then return nil, "No Common companion templates in Workspace or ServerStorage assets" end
 		table.sort(candidates)
 		templateId = candidates[random:NextInteger(1, #candidates)]
 	end
+	assert(templateId, "Starter template selection must produce an ID")
 	local element, rarity = Collection.Identity(templateId)
 	if not element or not rarity then return nil, "Unknown legacy companion" end
 	local starter = Collection.Create(templateId)

@@ -5,24 +5,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local function getRemotesModule(): ModuleScript
-	local shared = ReplicatedStorage:WaitForChild("Shared", 10)
-	local remotesItem = shared and (shared:FindFirstChild("Remotes") or shared:WaitForChild("Remotes", 5))
-	if remotesItem then
-		if remotesItem:IsA("ModuleScript") then
-			return remotesItem
-		elseif remotesItem:IsA("Folder") then
-			local child = remotesItem:FindFirstChild("Remotes") or remotesItem:WaitForChild("Remotes", 3)
-			if child and child:IsA("ModuleScript") then
-				return child
-			end
-		end
-		return remotesItem :: any
-	end
-	error("[Inventory]: Could not locate Remotes module under ReplicatedStorage.Shared")
-end
-
-local Remotes = require(getRemotesModule())
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
 
 local Data = require(script.Parent.PlayerDataModule)
 local Inventory = {}

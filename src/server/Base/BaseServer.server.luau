@@ -33,14 +33,15 @@ local function view(player: Player)
     if not state or not base then
         return { Ready = false, Level = 0, Details = "Waiting for your base…", UpgradeText = "Base not ready", CanUpgrade = false }
     end
-    local lines = { Config.BaseLevels[state.Level].Name, "Forge and station access available from Base level 1.", "" }
+    local lines = { Config.BaseLevels[state.Level].Name, "Each base upgrade unlocks one predefined facility slot.", "" }
     local placed = base.Model and base.Model:FindFirstChild("PlacedAssets")
-    for _, zone in { "Zone1", "Zone2" } do
+    for _, zone in ipairs(Config.BaseLevels[state.Level].Slots) do
         local config = Config.Zones[zone]
+        if not config.Available then table.insert(lines, config.Name .. ": Coming soon"); continue end
         if state.PurchasedZones[zone] then
-            local tier = if zone == "Zone1" then state.Forge.Tier else state.ChargeStation.Tier
-            local tiers = if zone == "Zone1" then Config.ForgeTiers else Config.ChargeTiers
-            table.insert(lines, ("%s: Tier %d%s"):format(config.Name, tier, if tier == #tiers then " (MAX)" else ""))
+            local tier = if config.AssetType == "Forge" then state.Forge.Tier else state.ChargeStations[zone].Tier
+            local tiers = if config.AssetType == "Forge" then Config.ForgeTiers else Config.ChargeTiers
+            table.insert(lines, ("%s (" .. zone .. "): Tier %d%s"):format(config.Name, tier, if tier == #tiers then " (MAX)" else ""))
             local asset = placed and placed:FindFirstChild(zone)
             if not asset or asset:GetAttribute("BaseOwnerUserId") ~= player.UserId then
                 table.insert(lines, "Not restored — use the zone's retry prompt.")

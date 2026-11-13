@@ -24,9 +24,11 @@ local function initializeHUD()
 	local wallet = Theme.Panel(screen, {
 		Name = "WalletPanel",
 		Position = UDim2.fromOffset(18, 18),
-		Size = UDim2.fromOffset(260, 72),
+		Size = UDim2.new(1, -36, 0, 72),
 		BackgroundColor3 = C.Panel,
 	})
+
+	make("UISizeConstraint", wallet, { MaxSize = Vector2.new(300, 72) })
 
 	make("TextLabel", wallet, {
 		Name = "WalletHeader",
@@ -45,7 +47,7 @@ local function initializeHUD()
 		Size = UDim2.new(1, -28, 0, 32),
 		BackgroundTransparency = 1,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextSize = 16,
+		TextSize = 14,
 		TextColor3 = C.Ink,
 		Text = "CASH: $100  |  LVL 1",
 	})

@@ -11,7 +11,7 @@ local Inventory = require(ServerScriptService:WaitForChild("Server"):WaitForChil
 local Config = require(game:GetService("ReplicatedStorage").Shared.BaseConfig)
 local BaseManager = require(script.Parent.BaseManager)
 local BaseAssetManager = {}
-local lastConsumption: { [number]: number } = {}
+local lastConsumption: { [number]: { [string]: number } } = {}
 local lastOre: { [number]: string } = {}
 
 export type ForgeInventory = {
@@ -30,10 +30,11 @@ export type ChargeStationState = {
 export type PlayerAssetData = {
     Forge: ForgeInventory,
     ChargeStation: ChargeStationState,
+    ChargeStations: { [string]: ChargeStationState },
 }
 
 local initialized = false
-local stationModels: { [number]: Instance } = {}
+local stationModels: { [number]: { [string]: Instance } } = {}
 
 local assetStates: { [number]: PlayerAssetData } = {}
 local statusGuis: { [number]: { [string]: BillboardGui } } = {}
@@ -56,6 +57,16 @@ local function getItemTotal(items: { [string]: number }): number
         total += amount
     end
     return total
+end
+
+local function assetBottom(assetInstance: Instance, primaryPart: BasePart): number
+    if assetInstance:IsA("Model") then
+        local box, size = assetInstance:GetBoundingBox()
+        return box.Position.Y - size.Y * 0.5
+    elseif assetInstance:IsA("BasePart") then
+        return assetInstance.Position.Y - assetInstance.Size.Y * 0.5
+    end
+    return primaryPart.Position.Y - primaryPart.Size.Y * 0.5
 end
 
 local function makeStatusLabel(parent: BillboardGui, name: string, position: UDim2, size: UDim2, textSize: number): TextLabel
@@ -86,9 +97,9 @@ local function createStatusGui(player: Player, assetInstance: Instance, assetTyp
     billboard.Name = "StatusBillboard"
     billboard.Adornee = primaryPart
     billboard.AlwaysOnTop = true
-    billboard.MaxDistance = 100
+    billboard.MaxDistance = Config.StatusRange
     billboard.Size = UDim2.fromOffset(280, 170)
-    billboard.StudsOffsetWorldSpace = Vector3.new(0, 5, 0)
+    billboard.StudsOffsetWorldSpace = Vector3.new(0, assetBottom(assetInstance, primaryPart) - primaryPart.Position.Y, 0)
     billboard.Parent = assetInstance
 
     local panel = Instance.new("Frame")
@@ -140,10 +151,10 @@ local function updateStatusGui(player: Player, assetType: string)
             getItemTotal(forge.Intake), describe(forge.Intake), if next(forge.Intake) then "PROCESSING" else "IDLE",
             FORGE_TIERS[forge.Tier].ProcessPerTick, getItemTotal(forge.Output), describe(forge.Output))
     else
-        local charge = state.ChargeStation
-        local supplying = os.clock() - (lastConsumption[player.UserId] or -math.huge) < 1.5
+        local charge = state.ChargeStations[assetType]
+        local supplying = os.clock() - ((lastConsumption[player.UserId] or {})[assetType] or -math.huge) < 1.5
         local stateText = if supplying then "SUPPLYING COMPANION" elseif charge.PowerStored >= charge.MaxPower then "FULL" else "FILLING"
-        title.Text = ("STATION | TIER %d%s"):format(charge.Tier, if charge.Tier == #CHARGE_STATION_TIERS then " | MAX" else "")
+        title.Text = ("%s | TIER %d%s"):format(string.upper(Config.Zones[assetType].Name), charge.Tier, if charge.Tier == #CHARGE_STATION_TIERS then " | MAX" else "")
         status.Text = ("POWER: %d / %d\nGENERATION: +%d/s\n%s\nCompanion Home mode to recharge"):format(
             math.floor(charge.PowerStored), charge.MaxPower, charge.GenerationRate, stateText)
     end
@@ -307,32 +318,35 @@ local function upgrade(player: Player, zone: string): boolean
         local placed = base and base.Model and base.Model:FindFirstChild("PlacedAssets")
         local current = placed and placed:FindFirstChild(zone)
         local part = current and getPrimaryPart(current)
-        if not state or not base or not base.PurchasedZones[zone] or not part or not BaseManager.Near(player, part.Position) then
+        if not state or not base or not Config.HasSlot(base.Level, zone) or not base.PurchasedZones[zone] or not part or not BaseManager.Near(player, part.Position) then
             return { Success = false, Message = "Stand near your purchased facility to upgrade." }
         end
-        local isForge = zone == "Zone1"
-        local tier = if isForge then state.Forge.Tier else state.ChargeStation.Tier
+        local isForge = Config.Zones[zone].AssetType == "Forge"
+        local station = state.ChargeStations[zone]
+        local tier = if isForge then state.Forge.Tier else station.Tier
         local tiers = if isForge then FORGE_TIERS else CHARGE_STATION_TIERS
         local nextTier = tiers[tier + 1]
         if not nextTier then return { Success = false, Message = "Facility is at maximum tier." } end
         local allowed, reason = BaseManager.CanSpend(player, nextTier.Cost, nextTier.RequiredBaseLevel)
         if not allowed then return { Success = false, Message = reason } end
-        local oldCharge = table.clone(state.ChargeStation)
+        local oldCharge = if station then table.clone(station) else nil
         if isForge then state.Forge.Tier = tier + 1
         else
             local config = CHARGE_STATION_TIERS[tier + 1]
-            state.ChargeStation.Tier = tier + 1
-            state.ChargeStation.MaxPower = config.MaxPower
-            state.ChargeStation.GenerationRate = config.Rate
+            station.Tier = tier + 1
+            station.MaxPower = config.MaxPower
+            station.GenerationRate = config.Rate
         end
         local folder = BaseManager.GetAssetFolder(Config.Zones[zone].Folder)
         local ok, model = pcall(BaseManager.UpgradeZoneAsset, player, zone, folder, nextTier.ModelName)
         if not ok or not model then
             state.Forge.Tier = if isForge then tier else state.Forge.Tier
-            state.ChargeStation.Tier = oldCharge.Tier
-            state.ChargeStation.MaxPower = oldCharge.MaxPower
-            state.ChargeStation.GenerationRate = oldCharge.GenerationRate
-            state.ChargeStation.PowerStored = oldCharge.PowerStored
+            if station and oldCharge then
+                station.Tier = oldCharge.Tier
+                station.MaxPower = oldCharge.MaxPower
+                station.GenerationRate = oldCharge.GenerationRate
+                station.PowerStored = oldCharge.PowerStored
+            end
             if current then BaseAssetManager.SetupAssetPrompts(player, current, zone) end
             return { Success = false, Message = "Upgrade template unavailable. Current facility and resources preserved." }
         end
@@ -393,54 +407,88 @@ end
 -- CHARGE STATION MECHANICS (Power Generation, Storage, Upgrades)
 --------------------------------------------------------------------------------
 
-function BaseAssetManager.GetChargeStationModel(player: Player): Instance?
-    local model = stationModels[player.UserId]
-    return if model and model:IsDescendantOf(workspace) then model else nil
+function BaseAssetManager.GetChargeStationModel(player: Player, slot: string?): Instance?
+    local models = stationModels[player.UserId]
+    local model = models and models[slot or "Zone2"]
+    return if model and model:IsDescendantOf(workspace) and model:GetAttribute("BaseOwnerUserId") == player.UserId then model else nil
 end
 
-function BaseAssetManager.GetChargeStationData(player: Player): ChargeStationState?
+function BaseAssetManager.GetChargeStationData(player: Player, slot: string?): ChargeStationState?
     local state = assetStates[player.UserId]
-    if not state then return nil end
-    return table.clone(state.ChargeStation)
+    local station = state and state.ChargeStations[slot or "Zone2"]
+    return if station then table.clone(station) else nil
 end
 
-function BaseAssetManager.UpgradeChargeStation(player: Player): boolean return upgrade(player, "Zone2") end
+-- Stable layout order, retaining a charged current station until it is drained.
+function BaseAssetManager.SelectChargeStation(player: Player, current: string?, advance: boolean?): string?
+    local state = assetStates[player.UserId]
+    local base = BaseManager.GetBaseForPlayer(player)
+    if not state or not base then return nil end
+    local slots = Config.BaseLevels[base.Level].Slots
+    local start = if current then table.find(slots, current) or 0 else 0
+    if current and not advance and Config.HasSlot(base.Level, current) then
+        local station = state.ChargeStations[current]
+        if station and station.PowerStored > 0 and base.PurchasedZones[current]
+            and BaseAssetManager.GetChargeStationModel(player, current) then return current end
+    end
+    for offset = 1, #slots do
+        local slot = slots[((start + offset - 1) % #slots) + 1]
+        local station = state.ChargeStations[slot]
+        if station and station.PowerStored > 0 and base.PurchasedZones[slot]
+            and BaseAssetManager.GetChargeStationModel(player, slot) then return slot end
+    end
+    return nil
+end
 
-local function publishCharge(userId: number, cs: ChargeStationState)
-    local model = stationModels[userId]
+function BaseAssetManager.UpgradeChargeStation(player: Player, slot: string?): boolean
+    local zone = slot or "Zone2"
+    local definition = Config.Zones[zone]
+    if not definition or definition.AssetType ~= "ChargeStation" then return false end
+    return upgrade(player, zone)
+end
+
+local function publishCharge(userId: number, slot: string, cs: ChargeStationState)
+    local models = stationModels[userId]
+    local model = models and models[slot]
     if model and model:IsDescendantOf(workspace) then
         model:SetAttribute("PowerStored", cs.PowerStored)
         model:SetAttribute("MaxPower", cs.MaxPower)
         model:SetAttribute("GenerationRate", cs.GenerationRate)
         local player = Players:GetPlayerByUserId(userId)
-        if player then
-            updateStatusGui(player, "Zone2")
-        end
+        if player then updateStatusGui(player, slot) end
     end
 end
 
--- Server-only consumption API; callers must validate the intended interaction.
-function BaseAssetManager.TryConsumeCharge(player: Player, amount: number): boolean
+-- Server-only consumption API; callers must validate range to this exact slot.
+function BaseAssetManager.TryConsumeCharge(player: Player, amount: number, slot: string?): boolean
     if amount ~= amount or amount <= 0 or amount == math.huge then return false end
+    local zone = slot or "Zone2"
     local state = assetStates[player.UserId]
-    local model = stationModels[player.UserId]
-    if not state or not model or not model:IsDescendantOf(workspace) then return false end
-    if state.ChargeStation.PowerStored < amount then return false end
-    state.ChargeStation.PowerStored -= amount
-    lastConsumption[player.UserId] = os.clock()
-    publishCharge(player.UserId, state.ChargeStation)
+    local station = state and state.ChargeStations[zone]
+    local base = BaseManager.GetBaseForPlayer(player)
+    if not station or not base or not Config.HasSlot(base.Level, zone) or not base.PurchasedZones[zone]
+        or not BaseAssetManager.GetChargeStationModel(player, zone) then return false end
+    if station.PowerStored < amount then return false end
+    station.PowerStored -= amount
+    local consumption = lastConsumption[player.UserId] or {}
+    consumption[zone] = os.clock()
+    lastConsumption[player.UserId] = consumption
+    publishCharge(player.UserId, zone, station)
     return true
 end
 
 function BaseAssetManager.StepChargeStations(deltaTime: number)
     if deltaTime ~= deltaTime or deltaTime <= 0 or deltaTime == math.huge then return end
     for userId, state in pairs(assetStates) do
-        local model = stationModels[userId]
         local player = Players:GetPlayerByUserId(userId)
-        if model and model:IsDescendantOf(workspace) and player and PlayerDataManager.GetProfile(player) then
-            local cs = state.ChargeStation
-            cs.PowerStored = math.min(cs.MaxPower, cs.PowerStored + cs.GenerationRate * deltaTime)
-            publishCharge(userId, cs)
+        local base = player and BaseManager.GetBaseForPlayer(player)
+        if not player or not base or not PlayerDataManager.GetProfile(player) then continue end
+        for slot, cs in pairs(state.ChargeStations) do
+            if Config.HasSlot(base.Level, slot) and base.PurchasedZones[slot]
+                and BaseAssetManager.GetChargeStationModel(player, slot) then
+                cs.PowerStored = math.min(cs.MaxPower, cs.PowerStored + cs.GenerationRate * deltaTime)
+                publishCharge(userId, slot, cs)
+            end
         end
     end
 end
@@ -460,26 +508,31 @@ function BaseAssetManager.SetupAssetPrompts(player: Player, assetInstance: Insta
     local primaryPart = getPrimaryPart(assetInstance)
     if not primaryPart then return end
 
-    if assetType ~= "Zone1" and assetType ~= "Zone2" then return end
+    local definition = Config.Zones[assetType]
+    if not definition or not definition.Available then return end
     setupStatusGui(player, assetInstance, assetType)
-    local isForge = assetType == "Zone1"
+    local isForge = definition.AssetType == "Forge"
     local state = assetStates[player.UserId]
     local tiers = if isForge then FORGE_TIERS else CHARGE_STATION_TIERS
-    local tier = if state then (if isForge then state.Forge.Tier else state.ChargeStation.Tier) else 1
+    local tier = if state then (if isForge then state.Forge.Tier else state.ChargeStations[assetType].Tier) else 1
     local isMax = tier >= #tiers
 
     if not isForge then
-        stationModels[player.UserId] = assetInstance
-        if state then publishCharge(player.UserId, state.ChargeStation) end
+        local models = stationModels[player.UserId] or {}
+        models[assetType] = assetInstance
+        stationModels[player.UserId] = models
+        if state then publishCharge(player.UserId, assetType, state.ChargeStations[assetType]) end
     end
 
     local existing = primaryPart:FindFirstChild("UpgradePrompt") or primaryPart:FindFirstChild("AssetInteractionPrompt")
     if existing then existing:Destroy() end
+    local oldAnchor = primaryPart:FindFirstChild("UpgradePromptAttachment")
+    if oldAnchor then oldAnchor:Destroy() end
 
     local prompt = Instance.new("ProximityPrompt")
     prompt.Name = "UpgradePrompt"
     prompt.ObjectText = if isForge then ("Forge (%s - Tier %d)"):format(FORGE_TIERS[tier].Name, tier)
-        else ("Charge Station (Tier %d)"):format(tier)
+        else ("%s (Tier %d)"):format(definition.Name, tier)
     local preview = "MAX"
     if not isMax then
         if isForge then preview = ("%d → %d items / 2s"):format(FORGE_TIERS[tier].ProcessPerTick, FORGE_TIERS[tier + 1].ProcessPerTick)
@@ -499,9 +552,13 @@ function BaseAssetManager.SetupAssetPrompts(player: Player, assetInstance: Insta
     prompt.Triggered:Connect(function(triggerPlayer: Player)
         if triggerPlayer ~= player or not primaryPart:IsDescendantOf(workspace) then return end
         if isForge then BaseAssetManager.UpgradeForge(player)
-        else BaseAssetManager.UpgradeChargeStation(player) end
+        else BaseAssetManager.UpgradeChargeStation(player, assetType) end
     end)
-    prompt.Parent = primaryPart
+    local anchor = Instance.new("Attachment")
+    anchor.Name = "UpgradePromptAttachment"
+    anchor.Parent = primaryPart
+    anchor.WorldPosition = Vector3.new(primaryPart.Position.X, assetBottom(assetInstance, primaryPart), primaryPart.Position.Z)
+    prompt.Parent = anchor
 
     -- Proximity polling replaces the legacy forge touch zone.
     if isForge then
